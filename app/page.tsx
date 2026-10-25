@@ -131,6 +131,8 @@ function Uploader({ onDone }: { onDone: () => void }) {
   const [divTz, setDivTz] = useState("+05:30");
   const [bosTz, setBosTz] = useState("+00:00");
   const input = useRef<HTMLInputElement>(null);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     setDivTz(load("divTz", "+05:30"));
@@ -168,6 +170,33 @@ function Uploader({ onDone }: { onDone: () => void }) {
     onDone();
   }, [jobs.length, divTz, bosTz, onDone]);
 
+  const sendText = async () => {
+    if (!text.trim() || sending) return;
+    setSending(true);
+    const at = jobs.length;
+    setJobs((j) => [...j, { name: "Pasted text", state: "reading" }]);
+    const set = (patch: Partial<Job>) => setJobs((j) => j.map((x, k) => (k === at ? { ...x, ...patch } : x)));
+    try {
+      const r = await fetch("/api/upload-text", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text, divergenceTz: divTz, structureTz: bosTz }),
+      });
+      const j = await r.json().catch(() => ({ error: `Server returned ${r.status}` }));
+      if (!r.ok) throw new Error(j.error || r.statusText);
+      const parts = (j as Array<{ source: string; signalCount: number; symbols: number; newCount: number; warnings: string[] }>).map(
+        (g) => `${g.source === "structure" ? "BOS/CHoCH" : "Divergence"}: ${g.signalCount} signals across ${g.symbols} symbols, ${g.newCount} new.`,
+      );
+      set({ state: "done", msg: parts.join(" "), warnings: j.flatMap((g: { warnings: string[] }) => g.warnings) });
+      setText("");
+    } catch (e) {
+      set({ state: "error", msg: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setSending(false);
+      onDone();
+    }
+  };
+
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const files = [...(e.clipboardData?.files ?? [])];
@@ -188,6 +217,16 @@ function Uploader({ onDone }: { onDone: () => void }) {
         <input ref={input} type="file" accept="image/*" multiple hidden
           onChange={(e) => { run([...(e.target.files ?? [])]); e.target.value = ""; }} />
       </div>
+      <details style={{ marginTop: 10 }}>
+        <summary className="small">Or paste signals as text</summary>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={8} spellCheck={false}
+          placeholder={"CAPTURED: 2026-10-25 16:00 +05:30\nBTCUSDT.P, 15m, G🔥, 22 Oct 15:15\nBTCUSDT.P, 1h, Int BOS↓, 24 Oct 14:00"}
+          style={{ width: "100%", marginTop: 8, background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 6, padding: 8, fontFamily: "ui-monospace, monospace", fontSize: 12.5, color: "inherit" }} />
+        <div className="row" style={{ marginTop: 6 }}>
+          <button className="btn primary" disabled={sending || !text.trim()} onClick={sendText}>{sending ? "Saving…" : "Save signals"}</button>
+          <span className="small muted">One signal per line: SYMBOL, TIMEFRAME, SIGNAL, TIME. Lines without a TZ: line use the timezones below.</span>
+        </div>
+      </details>
       <div className="row small muted" style={{ marginTop: 10 }}>
         <span>Times printed in the tables:</span>
         <label>Divergence screener&nbsp;

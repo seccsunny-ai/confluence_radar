@@ -54,7 +54,9 @@ async function main() {
   const confirmedBuys = await goldMatches(s, { direction: "bull", status: "confirmed" });
   assert.deepEqual(confirmedBuys.map(key), ["PEPEUSDT.P 15m GOLD_BUY"]);
 
-  const recentGold = await listSignals(s, { codes: ["GOLD_BUY"], sinceHours: 24 });
+  // Gold Buys since 24 Oct 16:00 UTC (the fixtures are from 25 Oct, so the window is measured from now)
+  const sinceHours = Math.ceil((Date.now() - Date.parse("2026-10-24T16:00:00Z")) / 3600_000);
+  const recentGold = await listSignals(s, { codes: ["GOLD_BUY"], sinceHours });
   assert.deepEqual(recentGold.map((r) => `${r.symbol} ${r.tf}`).sort(), ["JUPUSDT.P 15m", "JUPUSDT.P 1h", "LDOUSDT.P 15m", "PEPEUSDT.P 15m"]);
 
   const board = await symbolBoard(s);

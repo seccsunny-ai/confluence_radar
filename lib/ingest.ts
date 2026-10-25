@@ -74,7 +74,7 @@ export function flatten(
 export async function store(
   sql: postgres.Sql,
   flat: Flattened,
-  raw: ScreenshotData,
+  raw: unknown, // what was uploaded: the transcribed screenshot, or the pasted text
   filename: string | null,
   offsetMin: number,
 ): Promise<{ uploadId: number; newCount: number; duplicateUpload: boolean }> {
