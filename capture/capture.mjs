@@ -3,14 +3,16 @@
 //   node capture.mjs login <profile>   open a visible browser to sign in to TradingView once for that profile
 //   node capture.mjs                   capture every layout in config.json and upload it
 //
-// Each profile keeps its own saved browser login under ./profiles/<profile>, so two TradingView accounts work side by side.
+// Config comes from config.json, or from the CAPTURE_CONFIG environment variable (used by the GitHub Actions job).
+// Sign-in: a layout with "sessionid" and "sessionid_sign" (TradingView's login cookies) uses those; otherwise its
+// profile's saved browser login under ./profiles/<profile> is used, so two TradingView accounts work side by side.
 import { chromium } from "playwright";
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const config = JSON.parse(readFileSync(join(here, "config.json"), "utf8"));
+const config = JSON.parse(process.env.CAPTURE_CONFIG || readFileSync(join(here, "config.json"), "utf8"));
 const profileDir = (name) => join(here, "profiles", name);
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
@@ -25,16 +27,28 @@ async function login(profile) {
   log("Login saved.");
 }
 
+async function openContext(layout) {
+  const options = { viewport: config.viewport ?? { width: 1100, height: 1700 }, deviceScaleFactor: 1 };
+  const executablePath = process.env.CHROMIUM_PATH || undefined; // optional: use an already-installed Chromium
+  if (!layout.sessionid) return chromium.launchPersistentContext(profileDir(layout.profile), { headless: true, executablePath, ...options });
+  const browser = await chromium.launch({ headless: true, executablePath });
+  const ctx = await browser.newContext(options);
+  const cookie = (name, value) => ({ name, value, domain: ".tradingview.com", path: "/", secure: true, httpOnly: true, sameSite: "Lax" });
+  await ctx.addCookies([cookie("sessionid", layout.sessionid), ...(layout.sessionid_sign ? [cookie("sessionid_sign", layout.sessionid_sign)] : [])]);
+  ctx.on("close", () => browser.close());
+  return ctx;
+}
+
 async function captureOne(layout) {
-  const ctx = await chromium.launchPersistentContext(profileDir(layout.profile), {
-    headless: true,
-    viewport: config.viewport ?? { width: 1100, height: 1700 },
-    deviceScaleFactor: 1,
-  });
+  const ctx = await openContext(layout);
   try {
     const page = ctx.pages()[0] ?? (await ctx.newPage());
     await page.goto(layout.url, { waitUntil: "domcontentloaded", timeout: 90_000 });
-    if (page.url().includes("/signin")) throw new Error(`Not signed in. Run: node capture.mjs login ${layout.profile}`);
+    if (page.url().includes("/signin")) {
+      throw new Error(layout.sessionid
+        ? "TradingView rejected the saved login cookies. Copy fresh sessionid / sessionid_sign values into the config."
+        : `Not signed in. Run: node capture.mjs login ${layout.profile}`);
+    }
     await page.waitForSelector("canvas", { timeout: 60_000 });
     // Screener tables are drawn after every symbol's data loads, which takes a while on a 10-symbol screener.
     await page.waitForTimeout((config.waitSeconds ?? 25) * 1000);

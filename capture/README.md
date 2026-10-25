@@ -1,10 +1,38 @@
 # Automatic hourly capture
 
-Takes a screenshot of each TradingView chart layout and uploads it to Confluence Radar. Works with free TradingView accounts. It runs on your own computer, so the computer has to be on (and awake) for the hourly run.
+Takes a screenshot of each TradingView chart layout and uploads it to Confluence Radar. Works with free TradingView accounts. It can run in the cloud on GitHub Actions (below), or on your own computer.
 
 > TradingView's terms discourage automated access. This opens your own charts once an hour, the same as you would by hand, but use it at your own discretion.
 
-## One-time setup
+## GitHub Actions (runs in the cloud every hour)
+
+The workflow `.github/workflows/capture.yml` runs at 5 minutes past every hour. It needs one repository secret, `CAPTURE_CONFIG`.
+
+1. **Get each account's login cookies.** In Chrome, sign in to tradingview.com with the account, press F12, open Application → Cookies → `https://www.tradingview.com`, and copy the values of `sessionid` and `sessionid_sign`. For the second account, use a separate Chrome profile or an incognito window. Close that window without logging out, because logging out cancels the cookies.
+2. **Get each chart layout's address**: open the layout and copy the browser address, like `https://www.tradingview.com/chart/AbCdEf12/`.
+3. **Add the secret.** On GitHub go to the repository's Settings → Secrets and variables → Actions → New repository secret. Name it `CAPTURE_CONFIG` and paste:
+   ```json
+   {
+     "site": "https://confluence-radar.vercel.app",
+     "password": "",
+     "layouts": [
+       { "name": "divergence", "url": "https://www.tradingview.com/chart/XXXXXXXX/", "tz": "+05:30",
+         "sessionid": "...", "sessionid_sign": "..." },
+       { "name": "bos-choch", "url": "https://www.tradingview.com/chart/YYYYYYYY/", "tz": "+00:00",
+         "sessionid": "...", "sessionid_sign": "..." }
+     ],
+     "viewport": { "width": 1100, "height": 1700 },
+     "waitSeconds": 25
+   }
+   ```
+   `password` is your `APP_PASSWORD`, or empty. `tz` is the timezone the screener prints its times in.
+4. **Test it.** Open the Actions tab → "Hourly TradingView capture" → Run workflow. The log prints how many signals each upload produced. If a run fails, its screenshots are attached to the run as "shots", so you can see what the browser saw.
+
+The cookies are kept in GitHub's encrypted secrets and never appear in the code or logs. They expire eventually, and TradingView may sign out logins it sees from cloud servers. When a run says "rejected the saved login cookies", copy fresh values into the secret.
+
+## On your own computer
+
+### One-time setup
 
 1. Install [Node.js](https://nodejs.org) (LTS).
 2. Open a terminal in this `capture` folder and run:
@@ -27,7 +55,7 @@ Takes a screenshot of each TradingView chart layout and uploads it to Confluence
    ```
    It prints how many signals each upload produced. The last screenshot of each layout is saved in `shots/` so you can check the tables were fully drawn. If they were cut off, raise `viewport.height`; if they were still loading, raise `waitSeconds`.
 
-## Run it every hour
+### Run it every hour
 
 **Windows** (Task Scheduler), in a terminal in this folder:
 ```

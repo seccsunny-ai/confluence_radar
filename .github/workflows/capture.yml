@@ -1,0 +1,44 @@
+name: Hourly TradingView capture
+
+on:
+  schedule:
+    - cron: "5 * * * *" # every hour at :05 UTC (GitHub may start it a few minutes late)
+  workflow_dispatch: {}
+
+concurrency:
+  group: capture
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: capture
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Cache Playwright's Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('capture/package.json') }}
+      - run: npx playwright install --with-deps chromium
+      - name: Capture and upload
+        env:
+          CAPTURE_CONFIG: ${{ secrets.CAPTURE_CONFIG }}
+        run: |
+          if [ -z "$CAPTURE_CONFIG" ]; then echo "::error::Add the CAPTURE_CONFIG secret (see capture/README.md)"; exit 1; fi
+          node capture.mjs
+      - name: Keep the screenshots for checking
+        if: failure() # public repo: only keep screenshots when something went wrong
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots
+          path: capture/shots/
+          retention-days: 3
+          if-no-files-found: ignore

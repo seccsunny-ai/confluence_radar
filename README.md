@@ -36,7 +36,7 @@ The BOS/CHoCH screener only shows the latest event per cell, so if two structure
 
 ## Automatic hourly capture
 
-See [capture/README.md](capture/README.md): a small script that screenshots your TradingView layouts every hour and uploads them, for free TradingView accounts.
+See [capture/README.md](capture/README.md): a GitHub Actions job (or a script on your computer) that screenshots your TradingView layouts every hour and uploads them. Works with free TradingView accounts.
 
 ## Local development
 
