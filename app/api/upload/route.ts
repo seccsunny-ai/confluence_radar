@@ -25,7 +25,8 @@ export async function POST(req: Request) {
     };
     const base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
     const data = await extractScreenshot(base64, type);
-    const flat = flatten(data, offsets, new Date());
+    const sentTime = Date.parse(String(form.get("capturedAt") ?? ""));
+    const flat = Number.isFinite(sentTime) ? flatten(data, offsets, new Date(sentTime), true) : flatten(data, offsets, new Date());
     const sql = await db();
     const res = await store(sql, flat, data, file.name || null, offsets[flat.source]);
     return NextResponse.json({

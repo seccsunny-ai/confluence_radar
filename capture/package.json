@@ -1,0 +1,12 @@
+{
+  "name": "confluence-radar-capture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "login": "node capture.mjs login",
+    "capture": "node capture.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.56.0"
+  }
+}

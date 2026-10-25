@@ -19,11 +19,16 @@ export interface Flattened {
 }
 
 /** Turns the transcribed tables into individual signals with absolute UTC times. */
-export function flatten(data: ScreenshotData, offsets: Record<Source, number>, fallbackCapture: Date): Flattened {
+export function flatten(
+  data: ScreenshotData,
+  offsets: Record<Source, number>,
+  fallbackCapture: Date,
+  fallbackIsExact = false, // true when the uploader sent the capture time (automated screenshots have no header)
+): Flattened {
   const warnings: string[] = [];
   const header = parseCaptureHeader(data.header_text);
   const capturedAt = header ?? fallbackCapture;
-  if (!header) warnings.push(`Could not read the snapshot time from "${data.header_text}", so the upload time was used.`);
+  if (!header && !fallbackIsExact) warnings.push(`Could not read the snapshot time from "${data.header_text}", so the upload time was used.`);
 
   // Trust the labels over the model's classification when they disagree.
   const allLines = data.tables.flatMap((t) => t.rows.flatMap((r) => r.cells.flat())).join(" ");

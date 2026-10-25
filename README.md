@@ -34,6 +34,10 @@ The BOS/CHoCH screener only shows the latest event per cell, so if two structure
    - Optional, paid instead of Gemini: `ANTHROPIC_API_KEY` with `EXTRACTION_MODEL` (default `claude-opus-5-5`) and `EXTRACTION_EFFORT`. Used only when `GEMINI_API_KEY` is not set.
 4. Redeploy.
 
+## Automatic hourly capture
+
+See [capture/README.md](capture/README.md): a small script that screenshots your TradingView layouts every hour and uploads them, for free TradingView accounts.
+
 ## Local development
 
 ```bash

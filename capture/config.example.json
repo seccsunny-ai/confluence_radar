@@ -1,0 +1,20 @@
+{
+  "site": "https://confluence-radar.vercel.app",
+  "password": "",
+  "layouts": [
+    {
+      "name": "divergence",
+      "profile": "seccsunny",
+      "url": "https://www.tradingview.com/chart/XXXXXXXX/",
+      "tz": "+05:30"
+    },
+    {
+      "name": "bos-choch",
+      "profile": "mylgv30photos1",
+      "url": "https://www.tradingview.com/chart/YYYYYYYY/",
+      "tz": "+00:00"
+    }
+  ],
+  "viewport": { "width": 1100, "height": 1700 },
+  "waitSeconds": 25
+}
