@@ -55,37 +55,51 @@ export async function extractScreenshot(imageBase64: string, mediaType: MediaTyp
 
 let gemini: GoogleGenAI | null = null;
 
-// The first model is the configured one; the later ones are tried if Google has retired or renamed it.
-const GEMINI_MODELS = [...new Set([process.env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-flash-latest"])];
+// The configured model first; the others are tried when it is busy, retired or renamed.
+const GEMINI_MODELS = [...new Set([process.env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"])];
 
 const geminiSchema = (() => {
   const { $schema: _ignored, ...schema } = z.toJSONSchema(ScreenshotSchema) as Record<string, unknown>;
   return schema;
 })();
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function extractWithGemini(imageBase64: string, mediaType: MediaType): Promise<ScreenshotData> {
   gemini ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   let lastError: unknown;
   for (const model of GEMINI_MODELS) {
-    try {
-      const response = await gemini.models.generateContent({
-        model,
-        contents: [{ role: "user", parts: [{ inlineData: { mimeType: mediaType, data: imageBase64 } }, { text: PROMPT }] }],
-        config: { responseMimeType: "application/json", responseJsonSchema: geminiSchema, maxOutputTokens: 32000 },
-      });
-      const text = response.text;
-      if (!text) throw new Error(`Gemini returned no text (finish reason: ${response.candidates?.[0]?.finishReason ?? "unknown"}).`);
-      return ScreenshotSchema.parse(JSON.parse(text));
-    } catch (e) {
-      lastError = e;
-      const msg = e instanceof Error ? e.message : String(e);
-      // Only move on to the next model when this one is missing; rate limits and bad output are reported as is.
-      if (!/not found|404|is not supported/i.test(msg)) break;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await gemini.models.generateContent({
+          model,
+          contents: [{ role: "user", parts: [{ inlineData: { mimeType: mediaType, data: imageBase64 } }, { text: PROMPT }] }],
+          config: { responseMimeType: "application/json", responseJsonSchema: geminiSchema, maxOutputTokens: 32000 },
+        });
+        const text = response.text;
+        if (!text) throw new Error(`Gemini returned no text (finish reason: ${response.candidates?.[0]?.finishReason ?? "unknown"}).`);
+        return ScreenshotSchema.parse(JSON.parse(text));
+      } catch (e) {
+        lastError = e;
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(`Gemini ${model} attempt ${attempt + 1} failed: ${msg.slice(0, 200)}`);
+        if (/\b(503|500|UNAVAILABLE|INTERNAL|high demand|overloaded)\b/i.test(msg)) {
+          if (attempt === 0) await sleep(3000); // busy: retry once, then move to the next model
+          continue;
+        }
+        if (/not found|404|is not supported/i.test(msg)) break; // model missing: next model
+        throw friendly(msg); // quota, bad key, unreadable output: report as is
+      }
     }
   }
-  const msg = lastError instanceof Error ? lastError.message : String(lastError);
-  if (/429|RESOURCE_EXHAUSTED|quota/i.test(msg)) throw new Error("Gemini's free-tier limit was hit. Wait a minute and upload again.");
-  throw new Error(`Gemini could not read the screenshot: ${msg.slice(0, 300)}`);
+  throw friendly(lastError instanceof Error ? lastError.message : String(lastError));
+}
+
+function friendly(msg: string): Error {
+  if (/429|RESOURCE_EXHAUSTED|quota/i.test(msg)) return new Error("Gemini's free-tier limit was hit. Wait a minute and upload again.");
+  if (/API key not valid|API_KEY_INVALID|PERMISSION_DENIED/i.test(msg)) return new Error("Gemini rejected the API key. Check GEMINI_API_KEY in Vercel.");
+  if (/503|UNAVAILABLE|high demand/i.test(msg)) return new Error("Google's Gemini servers are busy right now. Try the upload again in a few minutes.");
+  return new Error(`Gemini could not read the screenshot: ${msg.slice(0, 300)}`);
 }
 
 // ── Claude ──
