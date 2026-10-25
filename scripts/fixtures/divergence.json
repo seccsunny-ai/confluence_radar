@@ -1,0 +1,46 @@
+{
+  "screener": "divergence",
+  "header_text": "seccsunny created with TradingView.com, Oct 25, 2026 16:00 UTC+5:30",
+  "tables": [
+    {
+      "timeframes": ["15m", "1h", "4h", "1D"],
+      "rows": [
+        { "symbol": "BTCUSDT.P", "cells": [
+          ["G🔥 22 Oct 15:15", "⚡ V↓ 25 Oct 09:15", "⚡ R↓ 25 Oct 09:15"],
+          ["G❄ 23 Sep 02:30", "⚡ V↑ 25 Oct 00:30", "R↑ 24 Oct 08:30"],
+          ["G❄ 03 Oct 01:30", "V↓ 03 Oct 01:30", "R↑ 18 Oct 13:30"],
+          ["G🔥 25 Nov 05:30", "V↓ 08 Oct 05:30", "R↓ 08 Sep 05:30"]
+        ]},
+        { "symbol": "FETUSDT.P", "cells": [
+          ["G❄ 23 Oct 12:00", "⚡ V↑ 25 Oct 15:30", "R↑ 24 Oct 22:00"],
+          ["G🔥 18 Oct 01:30", "⚡ V↑ 25 Oct 00:30", "R↑ 23 Oct 02:30"],
+          ["G❄ 31 May 17:30", "V↓ 26 Sep 09:30", "R↑ 10 Oct 17:30"],
+          ["G❄ 08 Oct 05:30", "V↓ 08 Oct 05:30", "R↓ 10 Oct 05:30"]
+        ]},
+        { "symbol": "LDOUSDT.P", "cells": [
+          ["⚡ G🔥 25 Oct 15:15", "⚡ V↑ 25 Oct 15:15", "R↑ 24 Oct 22:00"],
+          ["G❄ 21 Sep 10:30", "⚡ V↑ 25 Oct 00:30", "⚡ R↑ 25 Oct 01:30"],
+          ["G❄ 24 Aug 13:30", "V↓ 22 Oct 01:30", "R↓ 22 Sep 09:30"],
+          ["G❄ 16 Aug 05:30", "V↓ 30 Sep 05:30", "R↓ 30 Sep 05:30"]
+        ]},
+        { "symbol": "JUPUSDT.P", "cells": [
+          ["⚡ G🔥 25 Oct 15:15", "⚡ V↑ 25 Oct 15:15", "R↑ 24 Oct 18:45"],
+          ["⚡ G🔥 24 Oct 23:30", "⚡ V↑ 24 Oct 23:30", "R↓ 07 Oct 02:30"],
+          ["G❄ 19 Sep 21:30", "V↓ 22 Oct 09:30", "R↓ 28 Sep 21:30"],
+          ["V↓ 13 Oct 05:30", "R↓ 11 Sep 05:30"]
+        ]}
+      ]
+    },
+    {
+      "timeframes": ["15m", "1h", "4h", "1D"],
+      "rows": [
+        { "symbol": "PEPEUSDT.P", "cells": [
+          ["⚡ G🔥 24 Oct 21:45", "⚡ V↑ 25 Oct 12:45", "⚡ R↑ 25 Oct 15:45"],
+          ["G❄ 21 Oct 23:30", "V↓ 21 Oct 23:30", "⚡ R↑ 25 Oct 01:30"],
+          ["G🔥 02 Jul 01:30", "V↓ 12 Oct 21:30", "R↓ 24 Oct 09:30"],
+          ["G🔥 30 Jun 05:30", "V↓ 30 Jun 05:30", "R↓ 27 Sep 05:30"]
+        ]}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "screener": "structure",
+  "header_text": "mylgv30photos1 created with TradingView.com, Oct 25, 2026 16:00 UTC+5:30",
+  "tables": [
+    {
+      "timeframes": ["15m", "1h", "4h"],
+      "rows": [
+        { "symbol": "BTCUSDT.P", "cells": [["⚡ Int BOS↓", "25 Oct 08:15"], ["Int BOS↓", "24 Oct 14:00"], ["⚡ Sw CHoCH↓", "24 Oct 12:00"]] },
+        { "symbol": "FETUSDT.P", "cells": [["⚡ Int BOS↓", "25 Oct 08:15"], ["Sw BOS↓", "23 Oct 22:00"], ["Int CHoCH↓", "23 Oct 20:00"]] },
+        { "symbol": "LDOUSDT.P", "cells": [["⚡ Int BOS↓", "25 Oct 08:00"], ["⚡ Sw BOS↓", "25 Oct 08:00"], ["Int BOS↓", "24 Oct 04:00"]] },
+        { "symbol": "JUPUSDT.P", "cells": [["⚡ Int BOS↓", "25 Oct 08:15"], ["Sw BOS↓", "24 Oct 14:00"], ["Int BOS↓", "14 Oct 12:00"]] },
+        { "symbol": "PEPEUSDT.P", "cells": [["⚡ Int CHoCH↑", "25 Oct 10:00"], ["Int CHoCH↓", "24 Oct 06:00"], ["⚡ Int CHoCH↓", "24 Oct 12:00"]] }
+      ]
+    }
+  ]
+}
