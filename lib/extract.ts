@@ -56,7 +56,7 @@ export async function extractScreenshot(imageBase64: string, mediaType: MediaTyp
 let gemini: GoogleGenAI | null = null;
 
 // The configured model first; the others are tried when it is busy, retired or renamed.
-const GEMINI_MODELS = [...new Set([process.env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"])];
+const GEMINI_MODELS = [process.env.GEMINI_MODEL || "gemini-3.8-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-3.5-flash-lite"];
 
 const geminiSchema = (() => {
   const { $schema: _ignored, ...schema } = z.toJSONSchema(ScreenshotSchema) as Record<string, unknown>;
@@ -68,7 +68,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function extractWithGemini(imageBase64: string, mediaType: MediaType): Promise<ScreenshotData> {
   gemini ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   let lastError: unknown;
-  for (const model of GEMINI_MODELS) {
+  const models = [...new Set(GEMINI_MODELS)];
+  for (let m = 0; m < models.length && m < 6; m++) {
+    const model = models[m];
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const response = await gemini.models.generateContent({
@@ -87,8 +89,14 @@ async function extractWithGemini(imageBase64: string, mediaType: MediaType): Pro
           if (attempt === 0) await sleep(3000); // busy: retry once, then move to the next model
           continue;
         }
-        if (/not found|404|is not supported/i.test(msg)) break; // model missing: next model
-        throw friendly(msg); // quota, bad key, unreadable output: report as is
+        if (/not found|404|is not supported|no longer available/i.test(msg)) {
+          // Retired model: Google's error names the replacement, so try that next.
+          const suggested = msg.match(/use models\/([\w.-]+)/)?.[1];
+          if (suggested && !models.includes(suggested)) models.splice(m + 1, 0, suggested);
+          break;
+        }
+        if (/API key|PERMISSION_DENIED|429|RESOURCE_EXHAUSTED|quota/i.test(msg)) throw friendly(msg); // account problems: stop
+        break; // anything else (bad request for this model, unreadable output): try the next model
       }
     }
   }

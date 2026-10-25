@@ -30,7 +30,7 @@ The BOS/CHoCH screener only shows the latest event per cell, so if two structure
 3. Settings → Environment Variables:
    - `GEMINI_API_KEY`: free key from https://aistudio.google.com/apikey (no card needed). Free-tier limits are far above 2 screenshots an hour. Google may use free-tier inputs to improve its products.
    - `APP_PASSWORD` (recommended): the site then asks for a password (any username). Without it anyone with the URL can use up your Gemini quota.
-   - Optional: `GEMINI_MODEL` (default `gemini-2.5-flash`, falls back to `gemini-flash-latest` if Google retires it).
+   - Optional: `GEMINI_MODEL` (default `gemini-3.8-flash`). When a model is busy or retired the app moves on to other Flash models, including the replacement Google names in its error.
    - Optional, paid instead of Gemini: `ANTHROPIC_API_KEY` with `EXTRACTION_MODEL` (default `claude-opus-5-5`) and `EXTRACTION_EFFORT`. Used only when `GEMINI_API_KEY` is not set.
 4. Redeploy.
 
