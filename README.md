@@ -7,7 +7,7 @@ Upload hourly screenshots of two TradingView screeners and get a searchable hist
 
 ## How it works
 
-1. Drop, choose or paste screenshots. Claude reads each table cell by cell; the app then parses the labels and dates itself.
+1. Drop, choose or paste screenshots. A vision model (Google Gemini's free tier by default, or Claude) reads each table cell by cell; the app then parses the labels and dates itself.
 2. Every signal is stored once per symbol, timeframe, signal type and time. Symbols are never removed: when a symbol drops out of the screener its history stays, and newer screenshots add new signals to it.
 3. Tabs:
    - **Gold → BOS/CHoCH**: every Gold signal with the BOS/CHoCH that followed it on the same symbol in the same direction (G🔥 → bullish, G❄ → bearish), within the window for the Gold signal's timeframe: 15m → 2 days, 1h → 7 days, 4h → 14 days, 1D → 21 days. Status is *confirmed*, *watching* (window still open) or *expired*. The structure signal can be on any timeframe; tick "same timeframe" to require a match.
@@ -28,16 +28,17 @@ The BOS/CHoCH screener only shows the latest event per cell, so if two structure
 1. Import this repository in Vercel.
 2. Storage → add **Neon** (Postgres) from the Marketplace and connect it to the project. This sets `DATABASE_URL`. Tables are created on first use.
 3. Settings → Environment Variables:
-   - `ANTHROPIC_API_KEY`: from console.anthropic.com.
-   - `APP_PASSWORD` (recommended): the site then asks for a password (any username). Without it anyone with the URL can upload and spend API credit.
-   - Optional: `EXTRACTION_MODEL` (default `claude-opus-5-5`) and `EXTRACTION_EFFORT` (`low`/`medium`/`high`, default `medium`).
+   - `GEMINI_API_KEY`: free key from https://aistudio.google.com/apikey (no card needed). Free-tier limits are far above 2 screenshots an hour. Google may use free-tier inputs to improve its products.
+   - `APP_PASSWORD` (recommended): the site then asks for a password (any username). Without it anyone with the URL can use up your Gemini quota.
+   - Optional: `GEMINI_MODEL` (default `gemini-2.5-flash`, falls back to `gemini-flash-latest` if Google retires it).
+   - Optional, paid instead of Gemini: `ANTHROPIC_API_KEY` with `EXTRACTION_MODEL` (default `claude-opus-5-5`) and `EXTRACTION_EFFORT`. Used only when `GEMINI_API_KEY` is not set.
 4. Redeploy.
 
 ## Local development
 
 ```bash
 npm install
-cp .env.example .env.local   # fill in DATABASE_URL and ANTHROPIC_API_KEY
+cp .env.example .env.local   # fill in DATABASE_URL and GEMINI_API_KEY
 npm run dev
 DATABASE_URL=postgres://... npm test   # drops and recreates the tables in that database
 ```
