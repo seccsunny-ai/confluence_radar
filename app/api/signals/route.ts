@@ -15,6 +15,7 @@ export async function GET(req: Request) {
       source: q.get("source") || undefined,
       direction: q.get("direction") || undefined,
       sinceHours: num(q.get("sinceHours")),
+      latestOnly: q.get("latest") === "1",
       limit: num(q.get("limit")),
     });
     return NextResponse.json(rows);

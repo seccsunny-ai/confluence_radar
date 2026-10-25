@@ -8,6 +8,7 @@ export interface SignalFilter {
   source?: string;
   direction?: string;
   sinceHours?: number;
+  latestOnly?: boolean; // only signals seen in the newest upload of each screener
   limit?: number;
 }
 
@@ -19,6 +20,11 @@ export async function listSignals(sql: postgres.Sql, f: SignalFilter) {
   if (f.source) conds.push(sql`source = ${f.source}`);
   if (f.direction) conds.push(sql`direction = ${f.direction}`);
   if (f.sinceHours) conds.push(sql`signal_time >= now() - make_interval(hours => ${f.sinceHours})`);
+  if (f.latestOnly) {
+    conds.push(sql`id IN (
+      SELECT signal_id FROM sightings WHERE upload_id IN (
+        SELECT DISTINCT ON (source) id FROM uploads ORDER BY source, created_at DESC))`);
+  }
   const where = conds.length ? conds.reduce((a, c) => sql`${a} AND ${c}`) : sql`TRUE`;
   return sql`
     SELECT id, symbol, source, tf, code, family, direction, signal_time, first_seen_at, last_seen_at

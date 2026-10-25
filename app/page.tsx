@@ -364,9 +364,11 @@ function Matches({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
 function Signals({ fmt, refresh }: { fmt: (s: string) => string; refresh: number }) {
   const [codes, setCodes] = useState<string[]>(["GOLD_BUY"]);
   const [tfs, setTfs] = useState<string[]>([]);
-  const [since, setSince] = useState("24");
+  const [since, setSince] = useState("168");
+  const [latest, setLatest] = useState(true);
   const [symbol, setSymbol] = useState("");
   const [rows, setRows] = useState<Signal[] | null>(null);
+  const [hidden, setHidden] = useState(0); // matches outside the time window, for the empty-state hint
   const [allTfs, setAllTfs] = useState<string[]>(["15m", "1h", "4h", "1D"]);
   const [err, setErr] = useState("");
 
@@ -376,8 +378,18 @@ function Signals({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
     if (tfs.length) q.set("tfs", tfs.join(","));
     if (since) q.set("sinceHours", since);
     if (symbol) q.set("symbol", symbol);
-    getJson<Signal[]>(`/api/signals?${q}`).then((r) => { setRows(r); setErr(""); }).catch((e) => setErr(e.message));
-  }, [codes, tfs, since, symbol, refresh]);
+    if (latest) q.set("latest", "1");
+    getJson<Signal[]>(`/api/signals?${q}`).then((r) => {
+      setRows(r);
+      setErr("");
+      setHidden(0);
+      if (!r.length && since) {
+        q.delete("sinceHours");
+        q.set("limit", "5000");
+        getJson<Signal[]>(`/api/signals?${q}`).then((all) => setHidden(all.length)).catch(() => {});
+      }
+    }).catch((e) => setErr(e.message));
+  }, [codes, tfs, since, latest, symbol, refresh]);
 
   useEffect(() => {
     getJson<Signal[]>(`/api/symbols`).then((r) => {
@@ -385,6 +397,9 @@ function Signals({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
       setAllTfs([...s].sort(tfSort));
     }).catch(() => {});
   }, [refresh]);
+
+  // Signals that first appeared in the newest upload shown here.
+  const newest = rows?.reduce((m, r) => (r.first_seen_at > m ? r.first_seen_at : m), "") ?? "";
 
   const groups = [
     { name: "Gold", codes: ["GOLD_BUY", "GOLD_SELL"] },
@@ -415,16 +430,24 @@ function Signals({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
             <option value="720">Last 30 days</option>
             <option value="">Any time</option>
           </select>
+          <label className="small nowrap">
+            <input type="checkbox" checked={latest} onChange={(e) => setLatest(e.target.checked)} /> Only what the latest upload shows
+          </label>
           <input type="text" placeholder="Symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)} />
-          <button className="btn" onClick={() => { setCodes([]); setTfs([]); setSince(""); setSymbol(""); }}>Clear filters</button>
+          <button className="btn" onClick={() => { setCodes([]); setTfs([]); setSince(""); setLatest(false); setSymbol(""); }}>Clear filters</button>
         </div>
       </div>
       {err && <div className="panel status-err">{err}</div>}
       <div className="panel tablewrap">
         <div className="small muted" style={{ marginBottom: 8 }}>{rows ? `${rows.length} signals` : "Loading…"}</div>
-        {rows && rows.length === 0 ? <div className="empty">No signals match these filters.</div> : (
+        {rows && rows.length === 0 ? (
+          <div className="empty">
+            No signals match these filters.
+            {hidden > 0 && <> {hidden} older ones match outside the time window. <button className="btn" onClick={() => setSince("")}>Show any time</button></>}
+          </div>
+        ) : (
           <table>
-            <thead><tr><th>Symbol</th><th>Signal</th><th>TF</th><th className="nowrap">Signal time</th><th>Age</th><th className="nowrap">Last seen in a screenshot</th></tr></thead>
+            <thead><tr><th>Symbol</th><th>Signal</th><th>TF</th><th className="nowrap">Signal time</th><th>Age</th><th className="nowrap">First seen</th><th className="nowrap">Last seen in a screenshot</th></tr></thead>
             <tbody>
               {rows?.map((r) => (
                 <tr key={r.id} className={Date.now() - new Date(r.signal_time).getTime() < 864e5 ? "recent" : ""}>
@@ -433,6 +456,7 @@ function Signals({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
                   <td>{r.tf}</td>
                   <td className="nowrap">{fmt(r.signal_time)}</td>
                   <td className="nowrap small">{ago(r.signal_time)}</td>
+                  <td className="nowrap small muted">{fmt(r.first_seen_at)}{r.first_seen_at === newest ? <span className="badge watching" style={{ marginLeft: 6 }}>new</span> : null}</td>
                   <td className="nowrap small muted">{fmt(r.last_seen_at)}</td>
                 </tr>
               ))}
