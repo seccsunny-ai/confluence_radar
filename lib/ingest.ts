@@ -84,8 +84,16 @@ export async function store(
       VALUES (${filename}, ${flat.source}, ${flat.capturedAt}, ${offsetMin}, ${flat.signals.length},
               ${tx.json(flat.warnings)}, ${tx.json(raw as unknown as postgres.JSONValue)})
       RETURNING id`;
+    const fixes = new Map<string, string | null>();
+    for (const c of await tx`SELECT symbol, tf, from_code, signal_time, to_code FROM corrections WHERE symbol IN ${tx([...new Set(flat.signals.map((s) => s.symbol)), ""])}`) {
+      fixes.set(`${c.symbol}|${c.tf}|${c.from_code}|${new Date(c.signal_time).getTime()}`, c.to_code);
+    }
     let newCount = 0;
-    for (const s of flat.signals) {
+    for (const read of flat.signals) {
+      const key = `${read.symbol}|${read.tf}|${read.code}|${read.time.getTime()}`;
+      const fixed = fixes.has(key) ? fixes.get(key)! : read.code;
+      if (!fixed) continue; // marked as not a real signal
+      const s = { ...read, code: fixed };
       const def = SIGNAL_BY_CODE[s.code];
       const [row] = await tx`
         INSERT INTO signals (symbol, source, tf, code, family, direction, signal_time, first_seen_at, last_seen_at)
@@ -117,5 +125,47 @@ export async function deleteUpload(sql: postgres.Sql, id: number) {
         DELETE FROM signals s WHERE s.id IN ${tx(ids.map((r) => r.signal_id as number))}
           AND NOT EXISTS (SELECT 1 FROM sightings g WHERE g.signal_id = s.id)`;
     }
+  });
+}
+
+/**
+ * Fixes a misread signal: relabels it (toCode) or removes it (null), and remembers the fix so later uploads
+ * that misread the same cell are corrected too.
+ */
+export async function correctSignal(sql: postgres.Sql, id: number, toCode: string | null) {
+  return sql.begin(async (tx) => {
+    const [sig] = await tx`SELECT * FROM signals WHERE id = ${id} FOR UPDATE`;
+    if (!sig) throw new Error("That signal no longer exists.");
+    if (toCode === sig.code) return { id };
+    const def = toCode ? SIGNAL_BY_CODE[toCode] : null;
+    if (toCode && !def) throw new Error(`Unknown signal ${toCode}.`);
+    if (def && def.source !== sig.source) throw new Error("A signal can only be relabelled within the same screener.");
+    // Earlier fixes that produced this signal now point at the new label; then record this one.
+    await tx`UPDATE corrections SET to_code = ${toCode} WHERE symbol = ${sig.symbol} AND tf = ${sig.tf}
+      AND signal_time = ${sig.signal_time} AND to_code = ${sig.code}`;
+    await tx`
+      INSERT INTO corrections (symbol, tf, from_code, signal_time, to_code)
+      VALUES (${sig.symbol}, ${sig.tf}, ${sig.code}, ${sig.signal_time}, ${toCode})
+      ON CONFLICT (symbol, tf, from_code, signal_time) DO UPDATE SET to_code = EXCLUDED.to_code, created_at = now()`;
+    if (!def) {
+      await tx`DELETE FROM signals WHERE id = ${id}`;
+      return { id: null };
+    }
+    const [existing] = await tx`
+      SELECT id FROM signals WHERE symbol = ${sig.symbol} AND tf = ${sig.tf} AND code = ${toCode} AND signal_time = ${sig.signal_time}`;
+    if (existing) {
+      // The correct signal is already stored: merge this one into it.
+      await tx`
+        INSERT INTO sightings (upload_id, signal_id, recent_badge)
+        SELECT upload_id, ${existing.id}, recent_badge FROM sightings WHERE signal_id = ${id}
+        ON CONFLICT DO NOTHING`;
+      await tx`
+        UPDATE signals SET first_seen_at = LEAST(first_seen_at, ${sig.first_seen_at}),
+          last_seen_at = GREATEST(last_seen_at, ${sig.last_seen_at}) WHERE id = ${existing.id}`;
+      await tx`DELETE FROM signals WHERE id = ${id}`;
+      return { id: existing.id as number };
+    }
+    await tx`UPDATE signals SET code = ${toCode}, family = ${def.family}, direction = ${def.direction} WHERE id = ${id}`;
+    return { id };
   });
 }

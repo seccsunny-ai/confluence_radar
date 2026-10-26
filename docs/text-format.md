@@ -36,6 +36,7 @@ Then one line per signal: SYMBOL, TIMEFRAME, SIGNAL, TIME
 - SIGNAL exactly as printed, keeping the ⚡ in front when the cell shows it: one of G🔥 (Gold Buy, orange flame), G❄ (Gold Sell, snowflake), V↑, V↓, R↑, R↓, Int BOS↑, Int BOS↓, Sw BOS↑, Sw BOS↓, Int CHoCH↑, Int CHoCH↓, Sw CHoCH↑, Sw CHoCH↓. Bullish labels are usually green or blue, bearish ones red or orange; use the colour to check every arrow.
 - TIME exactly as printed, e.g. 25 Oct 15:15. In the BOS/CHoCH table the time is on the line under the label.
 - Read dimmed (older) text too; copy every date and time digit by digit.
+- Before answering, zoom in on every G label again: G🔥 has an orange flame (Gold Buy), G❄ has a pale six-pointed snowflake (Gold Sell). Do not guess from the row's other signals.
 
 Example:
 CAPTURED: Oct 25, 2026 16:00 UTC+5:30

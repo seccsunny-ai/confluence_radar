@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GOLD_WINDOW_DAYS, SIGNAL_BY_CODE } from "@/lib/signals";
+import { GOLD_WINDOW_DAYS, SIGNAL_BY_CODE, SIGNALS } from "@/lib/signals";
 
 type Tab = "matches" | "signals" | "symbols" | "uploads";
 
@@ -369,6 +369,7 @@ function Signals({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
   const [symbol, setSymbol] = useState("");
   const [rows, setRows] = useState<Signal[] | null>(null);
   const [hidden, setHidden] = useState(0); // matches outside the time window, for the empty-state hint
+  const [fixed, setFixed] = useState(0); // bumped after a correction to reload
   const [allTfs, setAllTfs] = useState<string[]>(["15m", "1h", "4h", "1D"]);
   const [err, setErr] = useState("");
 
@@ -389,7 +390,19 @@ function Signals({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
         getJson<Signal[]>(`/api/signals?${q}`).then((all) => setHidden(all.length)).catch(() => {});
       }
     }).catch((e) => setErr(e.message));
-  }, [codes, tfs, since, latest, symbol, refresh]);
+  }, [codes, tfs, since, latest, symbol, refresh, fixed]);
+
+  const correct = async (r: Signal, code: string) => {
+    if (!code) return;
+    const res = await fetch(`/api/signals/${r.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: code === "REMOVE" ? null : code }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) setErr(j.error || res.statusText);
+    setFixed((n) => n + 1);
+  };
 
   useEffect(() => {
     getJson<Signal[]>(`/api/symbols`).then((r) => {
@@ -447,7 +460,7 @@ function Signals({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
           </div>
         ) : (
           <table>
-            <thead><tr><th>Symbol</th><th>Signal</th><th>TF</th><th className="nowrap">Signal time</th><th>Age</th><th className="nowrap">First seen</th><th className="nowrap">Last seen in a screenshot</th></tr></thead>
+            <thead><tr><th>Symbol</th><th>Signal</th><th>TF</th><th className="nowrap">Signal time</th><th>Age</th><th className="nowrap">First seen</th><th className="nowrap">Last seen in a screenshot</th><th title="Correct a signal that was read wrongly. The fix is remembered for later uploads.">Fix</th></tr></thead>
             <tbody>
               {rows?.map((r) => (
                 <tr key={r.id} className={Date.now() - new Date(r.signal_time).getTime() < 864e5 ? "recent" : ""}>
@@ -458,6 +471,15 @@ function Signals({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
                   <td className="nowrap small">{ago(r.signal_time)}</td>
                   <td className="nowrap small muted">{fmt(r.first_seen_at)}{r.first_seen_at === newest ? <span className="badge watching" style={{ marginLeft: 6 }}>new</span> : null}</td>
                   <td className="nowrap small muted">{fmt(r.last_seen_at)}</td>
+                  <td>
+                    <select className="small" value="" onChange={(e) => correct(r, e.target.value)} aria-label="Correct this signal">
+                      <option value="">Wrong?</option>
+                      {SIGNALS.filter((d) => d.source === r.source && d.code !== r.code).map((d) => (
+                        <option key={d.code} value={d.code}>It's {d.label} {d.name}</option>
+                      ))}
+                      <option value="REMOVE">Not a signal, remove</option>
+                    </select>
+                  </td>
                 </tr>
               ))}
             </tbody>

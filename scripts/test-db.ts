@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { db, sql } from "../lib/db";
-import { deleteUpload, flatten, store } from "../lib/ingest";
+import { correctSignal, deleteUpload, flatten, store } from "../lib/ingest";
 import { goldMatches, listSignals, symbolBoard } from "../lib/queries";
 
 async function main() {
@@ -11,7 +11,7 @@ async function main() {
     console.log("DATABASE_URL not set, skipping db tests");
     return;
   }
-  await sql().unsafe("DROP TABLE IF EXISTS sightings, signals, uploads");
+  await sql().unsafe("DROP TABLE IF EXISTS sightings, signals, uploads, corrections");
   const s = await db();
   const offsets = { divergence: 330, structure: 0 };
   const ingest = async (file: string) => {
@@ -73,6 +73,20 @@ async function main() {
   const jup = (await goldMatches(s, { symbol: "JUP", status: "confirmed" })).map(key).sort();
   assert.deepEqual(jup, ["JUPUSDT.P 15m GOLD_BUY", "JUPUSDT.P 1h GOLD_BUY"]);
   assert.ok((await listSignals(s, { symbol: "BTCUSDT" })).length > 0);
+
+  // Fixing a misread Gold signal sticks when the same screenshot is read the same wrong way again
+  const [gold] = await listSignals(s, { codes: ["GOLD_BUY"], symbol: "PEPE", tfs: ["15m"] });
+  await correctSignal(s, gold.id, "GOLD_SELL");
+  await ingest("scripts/fixtures/divergence.json");
+  const pepe = await listSignals(s, { codes: ["GOLD_BUY", "GOLD_SELL"], symbol: "PEPE", tfs: ["15m"] });
+  assert.deepEqual(pepe.map((r) => `${r.code} ${r.id}`), [`GOLD_SELL ${gold.id}`]);
+  // Fixing it back follows the chain, and removing a signal keeps it out of later uploads
+  await correctSignal(s, gold.id, "GOLD_BUY");
+  await ingest("scripts/fixtures/divergence.json");
+  assert.equal((await listSignals(s, { codes: ["GOLD_SELL"], symbol: "PEPE", tfs: ["15m"] })).length, 0);
+  await correctSignal(s, gold.id, null);
+  await ingest("scripts/fixtures/divergence.json");
+  assert.equal((await listSignals(s, { codes: ["GOLD_BUY", "GOLD_SELL"], symbol: "PEPE", tfs: ["15m"] })).length, 0);
 
   console.log("db tests passed");
   await sql().end();

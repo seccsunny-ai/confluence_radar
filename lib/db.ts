@@ -68,5 +68,16 @@ async function migrate(s: postgres.Sql) {
       PRIMARY KEY (upload_id, signal_id)
     );
     CREATE INDEX IF NOT EXISTS sightings_signal ON sightings (signal_id);
+    -- Manual fixes for misread signals, applied again whenever a later upload reads the same cell the same wrong way.
+    -- to_code NULL means the signal should not exist at all.
+    CREATE TABLE IF NOT EXISTS corrections (
+      symbol      TEXT NOT NULL,
+      tf          TEXT NOT NULL,
+      from_code   TEXT NOT NULL,
+      signal_time TIMESTAMPTZ NOT NULL,
+      to_code     TEXT,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (symbol, tf, from_code, signal_time)
+    );
   `);
 }
