@@ -107,4 +107,21 @@ assert.deepEqual(logs.flatMap((g) => g.signals.map((s) => `${s.symbol} ${s.tf} $
 assert.equal(logs[0].capturedAt.toISOString(), "2026-10-26T07:01:00.000Z");
 assert.equal(logs[0].warnings.length, 0);
 
+// The same entries as Pine Logs actually copies them: each entry flattened onto one line
+const flat = parseTextUpload(
+  "[2026-10-26T15:00:00.000+05:30]: # Confluence Radar: divergence screener CAPTURED: 2026-10-26 09:42 +00:00 TZ: +00:00 " +
+    "BTCUSDT.P, 15m, G🔥, 2026-10-22 09:45 BTCUSDT.P, 15m, V↑, 2026-10-26 00:30 1000BONKUSDT.P, 1D, R↓, 2026-10-09 00:00\n\n\n" +
+    "[2026-10-26T15:15:00.440+05:30]: # Confluence Radar: BOS/CHoCH screener CAPTURED: 2026-10-26 09:45 +00:00 TZ: +00:00 " +
+    "SUIUSDT.P, 15m, Int BOS↑, 2026-10-26 03:15 SUIUSDT.P, 1h, Sw CHoCH↓, 2026-10-25 20:00",
+  { divergence: IST, structure: IST },
+);
+assert.deepEqual(flat.flatMap((g) => g.signals.map((s) => `${s.symbol} ${s.tf} ${s.code} ${s.time.toISOString()}`)), [
+  "BTCUSDT.P 15m GOLD_BUY 2026-10-22T09:45:00.000Z",
+  "BTCUSDT.P 15m VMC_BULL 2026-10-26T00:30:00.000Z",
+  "1000BONKUSDT.P 1D RSI_BEAR 2026-10-09T00:00:00.000Z",
+  "SUIUSDT.P 15m INT_BOS_BULL 2026-10-26T03:15:00.000Z",
+  "SUIUSDT.P 1h SW_CHOCH_BEAR 2026-10-25T20:00:00.000Z",
+]);
+assert.equal(flat[0].warnings.length, 0);
+
 console.log("parse tests passed");

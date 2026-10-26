@@ -27,13 +27,26 @@ function parseCaptured(v: string): Date | null {
   return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) - offset * 60_000);
 }
 
+/**
+ * Splits the paste into lines. Copying from TradingView's Pine Logs joins every line of an entry with spaces,
+ * so a new line is also started before CAPTURED:/TZ: and before each "SYMBOL," that follows a time.
+ */
+function splitLines(text: string): string[] {
+  return text.split(/\r?\n/).flatMap((line) =>
+    line
+      .replace(/\s+(?=(?:CAPTURED|TZ|TIMEZONE)\s*[:=])/gi, "\n")
+      .replace(/(\d{1,2}:\d{2})\s+(?=⚡?\s*[A-Z0-9][A-Z0-9._:-]*\s*[,|]\s*\S)/g, "$1\n")
+      .split("\n"),
+  );
+}
+
 export function parseTextUpload(text: string, defaultOffsets: Record<Source, number>, now = new Date()): Flattened[] {
   let capturedAt = null as Date | null;
   let tz = null as number | null;
   const warnings: string[] = [];
   const pending: Array<{ line: number; symbol: string; tf: string; signal: string; time: string; tz: number | null }> = [];
 
-  text.split(/\r?\n/).forEach((rawLine, i) => {
+  splitLines(text).forEach((rawLine, i) => {
     // Text copied from TradingView's Pine Logs starts each entry with its timestamp, e.g. "[2026-10-26T07:00:00.000+00:00]: ".
     const line = rawLine.trim().replace(/^\[?\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?\]?\s*:?\s*/, "");
     if (!line || line.startsWith("#") || line.startsWith("```")) return;
