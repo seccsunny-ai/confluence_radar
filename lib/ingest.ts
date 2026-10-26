@@ -85,7 +85,7 @@ export async function store(
               ${tx.json(flat.warnings)}, ${tx.json(raw as unknown as postgres.JSONValue)})
       RETURNING id`;
     const fixes = new Map<string, string | null>();
-    for (const c of await tx`SELECT symbol, tf, from_code, signal_time, to_code FROM corrections WHERE symbol IN ${tx([...new Set(flat.signals.map((s) => s.symbol)), ""])}`) {
+    for (const c of await tx`SELECT symbol, tf, from_code, signal_time, to_code FROM corrections WHERE symbol = ANY(${[...new Set(flat.signals.map((s) => s.symbol))]})`) {
       fixes.set(`${c.symbol}|${c.tf}|${c.from_code}|${new Date(c.signal_time).getTime()}`, c.to_code);
     }
     let newCount = 0;
