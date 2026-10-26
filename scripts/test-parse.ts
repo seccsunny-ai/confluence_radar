@@ -84,4 +84,27 @@ assert.deepEqual(bos2.signals.map((s) => `${s.symbol} ${s.code} ${s.time.toISOSt
 assert.equal(div2.warnings.length, 1); // the junk line
 assert.throws(() => parseTextUpload("hello", { divergence: IST, structure: 0 }));
 
+// Pine Logs export from the screener scripts: timestamp prefix on the first line, UTC times stated, form timezones ignored
+const logs = parseTextUpload(
+  [
+    "[2026-10-26T07:00:00.000+00:00]: # Confluence Radar: divergence screener",
+    "CAPTURED: 2026-10-26 07:01 +00:00",
+    "TZ: +00:00",
+    "PEPEUSDT.P, 15m, G🔥, 2026-10-26 00:30",
+    "PEPEUSDT.P, 1h, R↓, 2026-10-25 22:00",
+    "[2026-10-26T07:00:00.000+00:00]: # Confluence Radar: BOS/CHoCH screener",
+    "CAPTURED: 2026-10-26 07:01 +00:00",
+    "TZ: +00:00",
+    "PEPEUSDT.P, 15m, Int BOS↑, 2026-10-26 03:15",
+  ].join("\n"),
+  { divergence: IST, structure: IST },
+);
+assert.deepEqual(logs.flatMap((g) => g.signals.map((s) => `${s.symbol} ${s.tf} ${s.code} ${s.time.toISOString()}`)), [
+  "PEPEUSDT.P 15m GOLD_BUY 2026-10-26T00:30:00.000Z",
+  "PEPEUSDT.P 1h RSI_BEAR 2026-10-25T22:00:00.000Z",
+  "PEPEUSDT.P 15m INT_BOS_BULL 2026-10-26T03:15:00.000Z",
+]);
+assert.equal(logs[0].capturedAt.toISOString(), "2026-10-26T07:01:00.000Z");
+assert.equal(logs[0].warnings.length, 0);
+
 console.log("parse tests passed");

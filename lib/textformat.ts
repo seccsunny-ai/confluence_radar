@@ -34,7 +34,8 @@ export function parseTextUpload(text: string, defaultOffsets: Record<Source, num
   const pending: Array<{ line: number; symbol: string; tf: string; signal: string; time: string; tz: number | null }> = [];
 
   text.split(/\r?\n/).forEach((rawLine, i) => {
-    const line = rawLine.trim();
+    // Text copied from TradingView's Pine Logs starts each entry with its timestamp, e.g. "[2026-10-26T07:00:00.000+00:00]: ".
+    const line = rawLine.trim().replace(/^\[?\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?\]?\s*:?\s*/, "");
     if (!line || line.startsWith("#") || line.startsWith("```")) return;
     const kv = line.match(/^(CAPTURED|TZ|TIMEZONE)\s*[:=]\s*(.+)$/i);
     if (kv) {
