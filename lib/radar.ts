@@ -2,6 +2,7 @@
 // matching fib (and a BOS/CHoCH after that), and sends Telegram alerts for anything new.
 import type postgres from "postgres";
 import { AUTO_FIB_TFS, legFibs } from "./autofib";
+import { storedCandles, weeklyFromDaily } from "./candle-store";
 import { fibLevels, firstTouch, type Fib } from "./fibs";
 import { candlesSince, recentCandles, TF_MS } from "./market";
 import { GOLD_WINDOW_DAYS, SIGNAL_BY_CODE } from "./signals";
@@ -10,6 +11,7 @@ import { alertSettings, esc, sendTelegram, telegramReady, type AlertSettings } f
 import { analyzeTrend, fmtPrice, type Candle } from "./trend";
 
 export const TREND_TFS = ["15m", "1h", "4h", "1D"];
+const WEEKLY_DAYS = 2100; // daily candles kept per symbol: 300 weeks for the 1W structure
 const TRACK_DAYS = 7; // symbols with a signal in this many days get trends
 const ALERT_MAX_AGE_MS = 3 * 3600_000; // older events are recorded but not sent, so a first run doesn't flood the chat
 const ALERT_TZ = process.env.ALERT_TZ || "Asia/Kolkata";
@@ -119,10 +121,16 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
     const last = lastRun.get(`${s}|${tf}`);
     return last == null || Date.now() >= last + 2 * TF_MS[tf]; // the candle after the last closed one has closed
   });
-  await pool(due, 4, async ([symbol, tf]) => {
+  const drawFibs = async ([symbol, tf]: readonly [string, string]) => {
     let candles: Candle[];
     try {
-      candles = (await recentCandles(symbol, tf, 1000)).slice(0, -1); // the last one is still forming
+      if (tf === "1h" || tf === "2h") candles = (await recentCandles(symbol, tf, 1000)).slice(0, -1); // the last one is still forming
+      else {
+        // Bitget serves about 90 days per call, so these are built up over a few runs; 1W comes from the daily candles.
+        const got = await storedCandles(sql, symbol, tf === "4h" ? "4h" : "1D", tf === "4h" ? 1000 : WEEKLY_DAYS, tf === "1W" ? 0 : 8);
+        if (!got.complete) return; // older history still coming: draw once it's all there
+        candles = tf === "1W" ? weeklyFromDaily(got.candles) : tf === "1D" ? got.candles.slice(-1000) : got.candles;
+      }
     } catch (e) {
       errors.push(e instanceof Error ? e.message : String(e));
       return;
@@ -150,7 +158,10 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
       INSERT INTO fib_runs (symbol, tf, last_closed) VALUES (${symbol}, ${tf}, ${new Date(candles[candles.length - 1].t)})
       ON CONFLICT (symbol, tf) DO UPDATE SET last_closed = EXCLUDED.last_closed`;
     fibsRedrawn++;
-  });
+  };
+  // 1W is built from the daily candles, so it goes after 1D has fetched them
+  await pool(due.filter(([, tf]) => tf !== "1W"), 4, drawFibs);
+  await pool(due.filter(([, tf]) => tf === "1W"), 4, drawFibs);
 
   // ── Gold signals reaching a matching fib ──
   const windowCase = sql.unsafe(

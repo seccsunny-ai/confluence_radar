@@ -131,6 +131,24 @@ async function migrate(s: postgres.Sql) {
       last_closed  TIMESTAMPTZ NOT NULL,
       PRIMARY KEY (symbol, tf)
     );
+    -- Closed candles kept for timeframes where Bitget only serves about 90 days per call (4H, 1D), so the swing
+    -- structure can see further back. done = the history has been fetched back as far as needed (or as it goes).
+    CREATE TABLE IF NOT EXISTS candles (
+      symbol  TEXT NOT NULL,
+      tf      TEXT NOT NULL,
+      t       BIGINT NOT NULL,
+      o       DOUBLE PRECISION NOT NULL,
+      h       DOUBLE PRECISION NOT NULL,
+      l       DOUBLE PRECISION NOT NULL,
+      c       DOUBLE PRECISION NOT NULL,
+      PRIMARY KEY (symbol, tf, t)
+    );
+    CREATE TABLE IF NOT EXISTS candle_sets (
+      symbol  TEXT NOT NULL,
+      tf      TEXT NOT NULL,
+      done    BOOLEAN NOT NULL DEFAULT false,
+      PRIMARY KEY (symbol, tf)
+    );
     CREATE TABLE IF NOT EXISTS settings (
       key    TEXT PRIMARY KEY,
       value  JSONB NOT NULL
