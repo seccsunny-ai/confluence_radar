@@ -2,7 +2,8 @@ name: Price check and alerts
 
 # Every 15 minutes: refresh trends, look for Gold signals reaching a fib, and send Telegram alerts.
 # Needs the CRON_SECRET repository secret (the same value as CRON_SECRET in Vercel) when the site has APP_PASSWORD set.
-# Set the RADAR_URL repository variable if the site moves.
+# Set the RADAR_URL repository variable if the site moves. Use the project's own domain: Vercel Authentication
+# protects the generated *-<team>.vercel.app addresses, and a protected address answers 401 to this job.
 on:
   schedule:
     - cron: "*/15 * * * *"
@@ -19,7 +20,7 @@ jobs:
     steps:
       - name: Run the check
         env:
-          RADAR_URL: ${{ vars.RADAR_URL || 'https://confluence-radar-sunny-b0d4.vercel.app' }}
+          RADAR_URL: ${{ vars.RADAR_URL || 'https://confluence-radar.vercel.app' }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           auth=()
