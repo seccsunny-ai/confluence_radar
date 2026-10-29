@@ -26,7 +26,7 @@ This runs with your own TradingView logins on your home connection. Your compute
    ```
    node capture.mjs
    ```
-   It prints how many signals each upload produced. If it says it found no entries, look at `shots/<name>.png` to see what the browser saw, and try a bigger `waitSeconds`. To watch it work, add `"headless": false` to the config.
+   It prints how many signals each upload produced. If it says it found no entries, look at `shots/<name>.png` to see what the browser saw, and try a bigger `waitSeconds`. Opening Pine Logs re-runs each screener; the script waits up to `logsWaitSeconds` (default 60) for its log to appear. To watch it work, add `"headless": false` to the config.
 6. Run it every hour (see **Run it every hour** below). On Windows, also untick "Start the task only if the computer is on AC power" in Task Scheduler if you use a laptop.
 
 Without `"browser": "chrome"` it uses Playwright's own Chromium; install that with `npx playwright install chromium`. Google sign-in may refuse that browser, so sign in with your TradingView email and password, or use Chrome.
