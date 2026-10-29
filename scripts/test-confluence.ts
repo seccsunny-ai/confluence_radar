@@ -99,6 +99,11 @@ const weeks = weeklyFromDaily(days, mon + 16.5 * DAY);
 assert.deepEqual(weeks.map((w) => [new Date(w.t).toISOString().slice(0, 10), w.o, w.h, w.l, w.c]),
   [["2026-10-05", 10, 26, 5, 17], ["2026-10-12", 17, 33, 12, 24]]);
 
+// Before any break (the weekly charts): the last swing low to high is the leg, and the move since is in progress
+const noBreak = path([50, 10, 100, 60], 8, H);
+assert.deepEqual(legFibs(noBreak, swingStructure(noBreak, 4)).map((f) => `${f.direction} ${f.low.toFixed(2)}-${f.high.toFixed(2)} ${f.forming ? "forming" : "done"}`),
+  ["bull 9.99-100.01 done", "bear 59.99-100.01 forming"]);
+
 // Your examples: 1H/2H/4H are linear with 0.5/0.618/0.786; 1D/1W are log scale and add 0.382
 // (the 1D/1W anchors are read off the chart, so those levels are checked to within 0.05%)
 const near = (f: Parameters<typeof fibLevels>[0], want: number[]) => {
