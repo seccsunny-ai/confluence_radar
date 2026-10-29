@@ -11,7 +11,7 @@ async function main() {
     console.log("DATABASE_URL not set, skipping db tests");
     return;
   }
-  await sql().unsafe("DROP TABLE IF EXISTS fib_hits, fibs, trends, settings, alerts, ticks, sightings, signals, uploads, corrections");
+  await sql().unsafe("DROP TABLE IF EXISTS level_hits, candles, candle_sets, fib_runs, fib_hits, fibs, trends, settings, alerts, ticks, sightings, signals, uploads, corrections");
   const s = await db();
   const offsets = { divergence: 330, structure: 0 };
   const ingest = async (file: string) => {

@@ -360,7 +360,7 @@ export function Fibs({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
 // ─────────────────────────────── Telegram ───────────────────────────────
 
 interface AlertSettings {
-  gold: boolean; goldStructure: boolean; fibTouch: boolean; fibStructure: boolean; trendChange: boolean; trendPotential: boolean;
+  goldNew: boolean; fibHit: boolean; structureNew: boolean; gold: boolean; goldStructure: boolean; fibTouch: boolean; fibStructure: boolean; trendChange: boolean; trendPotential: boolean;
   trendTfs: string[]; fibTolerancePct: number; captureHealth: boolean; captureStaleMinutes: number;
 }
 interface TelegramInfo {
@@ -370,13 +370,19 @@ interface TelegramInfo {
 }
 
 const TOGGLES: Array<[keyof AlertSettings, string]> = [
+  ["goldNew", "🔥❄️ New Gold Buy / Gold Sell on any timeframe (once each, only signals new in the latest upload)"],
+  ["structureNew", "📈📉 New BOS / CHoCH on any timeframe (once each, only signals new in the latest upload)"],
+  ["fibHit", "🟢🔴🟡 Price hits a fib level (any fib, any timeframe; checked every 15 minutes)"],
+  ["captureHealth", "🩺 Capture problems: a chart failed or read far fewer signals than usual, or no upload for a while"],
+];
+// Older one-message-per-event alerts, off since the digest replaced them
+const OLD_TOGGLES: Array<[keyof AlertSettings, string]> = [
   ["fibStructure", "💥 Gold → fib touch → BOS/CHoCH (strongest)"],
   ["fibTouch", "🎯 Gold → price at a matching fib"],
   ["goldStructure", "✅ Gold → same-direction BOS/CHoCH"],
   ["trendPotential", "⚠️ Potential trend change"],
   ["trendChange", "Trend flipped up or down"],
-  ["gold", "Every new Gold signal"],
-  ["captureHealth", "🩺 Capture problems: a chart failed or read far fewer signals than usual, or no upload for a while"],
+  ["gold", "Every new Gold signal, one message each"],
 ];
 
 export function Alerts({ fmt }: { fmt: Fmt }) {
@@ -425,20 +431,31 @@ export function Alerts({ fmt }: { fmt: Fmt }) {
         {TOGGLES.map(([k, label]) => (
           <div key={k}><label><input type="checkbox" checked={info.settings[k] as boolean} onChange={(e) => save({ [k]: e.target.checked })} /> {label}</label></div>
         ))}
-        <div className="row small" style={{ marginTop: 8 }}>
-          <span>Trend alerts for</span>
-          {TREND_TFS.map((tf) => (
-            <label key={tf}><input type="checkbox" checked={info.settings.trendTfs.includes(tf)}
-              onChange={(e) => save({ trendTfs: e.target.checked ? [...info.settings.trendTfs, tf] : info.settings.trendTfs.filter((x) => x !== tf) })} /> {tfLabel(tf)}</label>
-          ))}
+        <div className="small muted" style={{ marginTop: 6 }}>
+          Gold, BOS/CHoCH and fib hits come as one message per check, with a block for each symbol that has something new. The block also
+          repeats the symbol&apos;s latest Gold and BOS/CHoCH signal on each timeframe and its latest fib hit, so you keep the picture until something replaces it. 🆕 marks what&apos;s new.
+          🟢 bullish fib retest · 🔴 bearish fib retest · 🟡 the fib hit lines up with a Gold signal in the same direction that&apos;s still in its window.
         </div>
+        <details style={{ marginTop: 8 }}>
+          <summary className="small muted">Older alerts</summary>
+          {OLD_TOGGLES.map(([k, label]) => (
+            <div key={k}><label><input type="checkbox" checked={info.settings[k] as boolean} onChange={(e) => save({ [k]: e.target.checked })} /> {label}</label></div>
+          ))}
+          <div className="row small" style={{ marginTop: 8 }}>
+            <span>Trend alerts for</span>
+            {TREND_TFS.map((tf) => (
+              <label key={tf}><input type="checkbox" checked={info.settings.trendTfs.includes(tf)}
+                onChange={(e) => save({ trendTfs: e.target.checked ? [...info.settings.trendTfs, tf] : info.settings.trendTfs.filter((x) => x !== tf) })} /> {tfLabel(tf)}</label>
+            ))}
+          </div>
+        </details>
         <div className="row small" style={{ marginTop: 8 }}>
           <label>A fib counts as touched within&nbsp;
             <input type="number" step="0.05" min="0" max="5" style={{ width: 70 }} defaultValue={info.settings.fibTolerancePct}
               onBlur={(e) => save({ fibTolerancePct: Number(e.target.value) })} />% of the level
           </label>
         </div>
-        <div className="small muted" style={{ marginTop: 8 }}>Only events from the last 3 hours are sent, so turning something on doesn&apos;t send old history.</div>
+        <div className="small muted" style={{ marginTop: 8 }}>Only events from the last 2–3 hours are sent, so turning something on doesn&apos;t send old history.</div>
       </div>
       <div className="panel">
         <h3 style={{ marginTop: 0 }}>Recently sent</h3>

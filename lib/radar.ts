@@ -1,11 +1,12 @@
-// The periodic check: refreshes trends and the auto fibs from live candles, looks for Gold signals reaching a
-// matching fib (and a BOS/CHoCH after that), and sends Telegram alerts for anything new.
+// The periodic check: refreshes trends and the auto fibs from live candles, records every fib level price reaches,
+// looks for Gold signals reaching a matching fib (and a BOS/CHoCH after that), and sends the Telegram digest.
 import type postgres from "postgres";
 import { AUTO_FIB_TFS, legFibs } from "./autofib";
 import { storedCandles, weeklyFromDaily } from "./candle-store";
 import { fibLevels, firstTouch, type Fib } from "./fibs";
 import { candlesSince, recentCandles, TF_MS } from "./market";
 import { GOLD_WINDOW_DAYS, SIGNAL_BY_CODE } from "./signals";
+import { findLevelHits, sendDigest } from "./digest";
 import { checkStale } from "./health";
 import { alertSettings, esc, sendTelegram, telegramReady, type AlertSettings } from "./telegram";
 import { analyzeTrend, fmtPrice, type Candle } from "./trend";
@@ -20,6 +21,7 @@ export interface TickSummary {
   symbols: number;
   trendsUpdated: number;
   fibsRedrawn: number; // symbol and timeframe pairs whose auto fibs were worked out again
+  levelHits: number; // fib levels price reached since the last run
   fibHits: number;
   structureAfterFib: number;
   alertsSent: number;
@@ -51,7 +53,7 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   const started = Date.now();
   const settings = await alertSettings(sql);
   const errors: string[] = [];
-  let alertsSent = 0, trendsUpdated = 0, fibsRedrawn = 0, fibHits = 0, structureAfterFib = 0;
+  let alertsSent = 0, trendsUpdated = 0, fibsRedrawn = 0, levelHits = 0, fibHits = 0, structureAfterFib = 0;
 
   const alert = async (enabled: boolean, key: string, html: string, isRecent: boolean) => {
     if (!enabled || !isRecent || !telegramReady()) return;
@@ -163,6 +165,13 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   await pool(due.filter(([, tf]) => tf !== "1W"), 4, drawFibs);
   await pool(due.filter(([, tf]) => tf === "1W"), 4, drawFibs);
 
+  // ── Every fib level price reached ──
+  try {
+    levelHits = await findLevelHits(sql, settings.fibTolerancePct, errors);
+  } catch (e) {
+    errors.push(e instanceof Error ? e.message : String(e));
+  }
+
   // ── Gold signals reaching a matching fib ──
   const windowCase = sql.unsafe(
     "CASE g.tf " + Object.entries(GOLD_WINDOW_DAYS).map(([tf, d]) => `WHEN '${tf}' THEN interval '${d} days'`).join(" ") + " END",
@@ -260,6 +269,13 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
     }
   }
 
+  // ── The Telegram digest: new Gold signals and fib hits ──
+  try {
+    alertsSent += await sendDigest(sql, settings, errors);
+  } catch (e) {
+    errors.push(e instanceof Error ? e.message : String(e));
+  }
+
   try {
     alertsSent += await checkStale(sql);
   } catch (e) {
@@ -267,7 +283,7 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   }
 
   const summary: TickSummary = {
-    symbols: symbols.length, trendsUpdated, fibsRedrawn, fibHits, structureAfterFib, alertsSent,
+    symbols: symbols.length, trendsUpdated, fibsRedrawn, levelHits, fibHits, structureAfterFib, alertsSent,
     errors: [...new Set(errors)].slice(0, 20), ms: Date.now() - started,
   };
   await sql`INSERT INTO ticks (summary) VALUES (${sql.json({ ...summary })})`;
