@@ -120,55 +120,82 @@ function entriesInText(text, found) {
 const DEBUG = process.argv.includes("--debug") || config.debug === true;
 
 /** Opens Pine Logs for every indicator on the chart through its legend's "More" menu. */
-async function openPineLogs(page, notes, found) {
-  const items = page.locator('[data-name="legend-source-item"], [data-qa-id="legend-source-item"]');
-  // A collapsed legend ("⌄ 3") hides the indicators; expand it first. The toggler also collapses an open legend,
-  // so it is only clicked when the indicators are hidden.
+const LEGEND_ITEMS = '[data-name="legend-source-item"], [data-qa-id="legend-source-item"]';
+
+/** A collapsed legend ("⌄ 3") hides the indicators. The toggler also collapses an open legend, so it is only clicked when they are hidden. */
+async function expandLegend(page, notes) {
+  const items = page.locator(LEGEND_ITEMS);
   const toggle = page.locator('[data-name="legend-toggler"], [data-qa-id="legend-toggler"], [aria-label*="Show indicator legend" i]').first();
   if (!(await items.last().isVisible({ timeout: 1000 }).catch(() => false)) && await toggle.isVisible({ timeout: 1000 }).catch(() => false)) {
     await toggle.click().catch(() => {});
     notes.push("expanded the collapsed legend");
     await page.waitForTimeout(500);
   }
-  const n = await items.count();
+}
+
+/**
+ * Opens Pine Logs for legend item k and waits for an entry not read before (the previous indicator's log can
+ * still be on screen). Returns the number of new entries, or null when the indicator has no Pine Logs item.
+ */
+async function readPineLogs(page, k, notes, found) {
+  const item = page.locator(LEGEND_ITEMS).nth(k);
+  const title = (await item.innerText().catch(() => "")).split("\n")[0];
+  // The screener tables sit over the legend and catch the pointer, so hover and click are forced.
+  await item.hover({ force: true, timeout: 5000 });
+  const more = item.locator('[data-name="legend-more-action"], [data-qa-id="legend-more-action"], [aria-label="More"]').first();
+  await more.click({ force: true, timeout: 3000 });
+  await page.waitForTimeout(500);
+  const menu = await page.locator('[role="menu"], [data-name="menu-inner"], [class*="menu"]').allInnerTexts().catch(() => []);
+  notes.push(`legend ${k} "${title}": menu = ${JSON.stringify(menu.join(" | ").slice(0, 600))}`);
+  const entry = page.getByText(/Pine Logs/i).first();
+  if (!(await entry.isVisible({ timeout: 2000 }).catch(() => false))) {
+    notes.push(`legend ${k}: no Pine Logs item`);
+    await page.keyboard.press("Escape");
+    return null;
+  }
+  const before = found.size;
+  await entry.click();
+  // Opening Pine Logs re-runs the screener, which takes a while before any log appears.
+  let panel = [];
+  const started = Date.now();
+  const deadline = started + (config.logsWaitSeconds ?? 60) * 1000;
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(2000);
+    const seen = new Set();
+    entriesInText(await page.locator("body").innerText().catch(() => ""), seen);
+    panel = [...seen].filter((e) => !found.has(e));
+    if (found.size > before || panel.length) break;
+  }
+  const fromNetwork = found.size > before;
+  if (!fromNetwork) panel.forEach((e) => found.add(e));
+  const got = found.size - before;
+  notes.push(`legend ${k}: ${got} entries (${fromNetwork ? "network" : "panel"}) after ${Math.round((Date.now() - started) / 1000)}s`);
+  return got;
+}
+
+/**
+ * Opens Pine Logs for every indicator on the chart through its legend's "More" menu. A log that never loads
+ * usually comes through after reloading the page, so each indicator gets up to `logsReloads` reloads.
+ */
+async function openPineLogs(page, notes, found) {
+  await expandLegend(page, notes);
+  const n = await page.locator(LEGEND_ITEMS).count();
   notes.push(`legend items: ${n}`);
   for (let k = 0; k < n; k++) {
-    const item = items.nth(k);
-    const title = (await item.innerText().catch(() => "")).split("\n")[0];
-    try {
-      // The screener tables sit over the legend and catch the pointer, so hover and click are forced.
-      await item.hover({ force: true, timeout: 5000 });
-      const more = item.locator('[data-name="legend-more-action"], [data-qa-id="legend-more-action"], [aria-label="More"]').first();
-      await more.click({ force: true, timeout: 3000 });
-      await page.waitForTimeout(500);
-      const menu = await page.locator('[role="menu"], [data-name="menu-inner"], [class*="menu"]').allInnerTexts().catch(() => []);
-      notes.push(`legend ${k} "${title}": menu = ${JSON.stringify(menu.join(" | ").slice(0, 600))}`);
-      const entry = page.getByText(/Pine Logs/i).first();
-      if (await entry.isVisible({ timeout: 2000 }).catch(() => false)) {
-        const before = found.size;
-        await entry.click();
-        // Opening Pine Logs re-runs the screener, which takes a while before any log appears.
-        // The previous indicator's log can still be on screen, so only entries not read before count.
-        const isNew = (e) => !found.has(e);
-        let panel = [];
-        const deadline = Date.now() + (config.logsWaitSeconds ?? 120) * 1000;
-        while (Date.now() < deadline) {
-          await page.waitForTimeout(2000);
-          const seen = new Set();
-          entriesInText(await page.locator("body").innerText().catch(() => ""), seen);
-          panel = [...seen].filter(isNew);
-          if (found.size > before || panel.length) break;
-        }
-        const fromNetwork = found.size > before;
-        if (!fromNetwork) panel.forEach((e) => found.add(e));
-        notes.push(`legend ${k}: ${fromNetwork ? found.size - before : panel.length} entries (${fromNetwork ? "network" : "panel"})`);
-      } else {
-        notes.push(`legend ${k}: no Pine Logs item`);
-        await page.keyboard.press("Escape");
+    for (let attempt = 0; ; attempt++) {
+      let got = 0;
+      try {
+        got = await readPineLogs(page, k, notes, found);
+      } catch (e) {
+        notes.push(`legend ${k}: ${e.message.split("\n")[0]}`);
+        await page.keyboard.press("Escape").catch(() => {});
       }
-    } catch (e) {
-      notes.push(`legend ${k} "${title}": ${e.message.split("\n")[0]}`);
+      if (got !== 0 || attempt >= (config.logsReloads ?? 2)) break;
+      notes.push(`legend ${k}: no log, reloading the page`);
+      await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
+      await page.waitForTimeout(15000);
       await page.keyboard.press("Escape").catch(() => {});
+      await expandLegend(page, notes);
     }
   }
 }
