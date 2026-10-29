@@ -11,6 +11,8 @@ export interface AlertSettings {
   trendPotential: boolean; // higher high in a downtrend / lower low in an uptrend
   trendTfs: string[];
   fibTolerancePct: number; // how close counts as touching a fib level
+  captureHealth: boolean; // the hourly capture failed, came back short, or stopped uploading
+  captureStaleMinutes: number;
 }
 
 export const DEFAULT_SETTINGS: AlertSettings = {
@@ -22,6 +24,8 @@ export const DEFAULT_SETTINGS: AlertSettings = {
   trendPotential: true,
   trendTfs: ["1h", "4h", "1D"],
   fibTolerancePct: 0.15,
+  captureHealth: true,
+  captureStaleMinutes: 90,
 };
 
 export async function getSetting<T>(sql: postgres.Sql, key: string): Promise<T | null> {

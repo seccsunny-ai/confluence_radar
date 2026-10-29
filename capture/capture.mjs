@@ -292,7 +292,7 @@ async function upload(layout, png, capturedAt) {
 
 async function main() {
   if (process.argv[2] === "login") return login(process.argv[3]);
-  let failed = false;
+  const report = [];
   for (const layout of config.layouts) {
     try {
       if (layout.mode === "pine") {
@@ -301,21 +301,36 @@ async function main() {
           throw new Error("No Confluence Radar entries in Pine Logs. Check that the export version of the screener is on this layout " +
             `(see pine/README.md), and look at shots/${layout.name}.png. Raising waitSeconds can help.`);
         }
+        let signals = 0;
         for (const r of await uploadText(entries)) {
+          signals += r.signalCount;
           log(`${layout.name}: ${r.source}, ${r.signalCount} signals, ${r.newCount} new${r.warnings?.length ? `, ${r.warnings.length} warnings` : ""}`);
         }
+        report.push({ name: layout.name, ok: true, signals });
         continue;
       }
       const capturedAt = new Date();
       const png = await captureOne(layout);
       const r = await upload(layout, png, capturedAt);
       log(`${layout.name}: ${r.source}, ${r.signalCount} signals, ${r.newCount} new${r.warnings?.length ? `, ${r.warnings.length} warnings` : ""}`);
+      report.push({ name: layout.name, ok: true, signals: r.signalCount });
     } catch (e) {
-      failed = true;
       log(`${layout.name}: FAILED: ${e.message}`);
+      report.push({ name: layout.name, ok: false, error: e.message });
     }
   }
-  process.exitCode = failed ? 1 : 0;
+  // The site sends a Telegram warning when a chart failed or read far fewer signals than usual.
+  try {
+    const res = await fetch(new URL("/api/capture-report", config.site), {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ charts: report }),
+    });
+    if (!res.ok) throw uploadError(res, await res.json().catch(() => ({})));
+  } catch (e) {
+    log(`report: FAILED: ${e.message}`);
+  }
+  process.exitCode = report.every((r) => r.ok) ? 0 : 1;
 }
 
 main().catch((e) => {

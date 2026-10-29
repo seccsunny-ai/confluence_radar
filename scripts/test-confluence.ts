@@ -152,6 +152,32 @@ async function e2e() {
   assert.equal(sent.length, 3); // 15m is off by default
   assert.equal((await s`SELECT count(*)::int AS n FROM ticks`)[0].n, 4);
 
+  // ── capture health ──
+  const { captureReport, checkStale } = await import("../lib/health");
+  sent.length = 0;
+  for (const n of [239, 240, 239]) assert.deepEqual(await captureReport(s, { charts: [{ name: "divergence", ok: true, signals: n }] }), []);
+  assert.equal(sent.length, 0);
+  const t0 = new Date("2026-01-01T10:33:00Z");
+  let problems = await captureReport(s, {
+    charts: [{ name: "divergence", ok: true, signals: 119 }, { name: "smc", ok: false, signals: 0, error: "No Confluence Radar entries" }],
+  }, t0);
+  assert.equal(problems.length, 2);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /Capture missed something[\s\S]*divergence<\/b> read only 119 signals \(usually 239\)[\s\S]*smc<\/b> failed: No Confluence/);
+  // The short read didn't lower the usual count, and the same hour isn't sent twice
+  problems = await captureReport(s, { charts: [{ name: "divergence", ok: true, signals: 120 }] }, t0);
+  assert.equal(problems.length, 1);
+  assert.equal(sent.length, 1);
+
+  // No upload for 2 hours: one warning per gap
+  sent.length = 0;
+  await s`INSERT INTO uploads (source, captured_at, created_at, tz_offset_min, raw) VALUES ('structure', now(), now() - interval '2 hours', 0, '{}')`;
+  assert.equal(await checkStale(s), 1);
+  assert.match(sent[0], /No BOS\/CHoCH signals for 2h 0m/);
+  assert.equal(await checkStale(s), 0);
+  await s`INSERT INTO uploads (source, captured_at, tz_offset_min, raw) VALUES ('structure', now(), 0, '{}')`;
+  assert.equal(await checkStale(s), 0);
+
   globalThis.fetch = realFetch;
   await sql().end();
   console.log("confluence full check passed");

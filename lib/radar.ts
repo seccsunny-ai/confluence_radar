@@ -4,6 +4,7 @@ import type postgres from "postgres";
 import { fibLevels, firstTouch, type Fib } from "./fibs";
 import { candlesSince, recentCandles, TF_MS } from "./market";
 import { GOLD_WINDOW_DAYS, SIGNAL_BY_CODE } from "./signals";
+import { checkStale } from "./health";
 import { alertSettings, esc, sendTelegram, telegramReady, type AlertSettings } from "./telegram";
 import { analyzeTrend, fmtPrice, type Candle } from "./trend";
 
@@ -201,6 +202,12 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
           recent(p.s_seen));
       }
     }
+  }
+
+  try {
+    alertsSent += await checkStale(sql);
+  } catch (e) {
+    errors.push(e instanceof Error ? e.message : String(e));
   }
 
   const summary: TickSummary = {
