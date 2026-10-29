@@ -50,6 +50,16 @@ export async function recentCandles(symbol: string, tf: string, limit = 300): Pr
   return toCandles(rows).sort((a, b) => a.t - b.t);
 }
 
+/** Up to 200 closed candles before `before`, oldest first (Bitget gives at most about 90 days per call). */
+export async function historyPage(symbol: string, tf: string, before: number): Promise<Candle[]> {
+  const g = GRANULARITY[tf];
+  if (!g) throw new Error(`No candles for timeframe ${tf}.`);
+  const rows = await call("/api/v2/mix/market/history-candles", {
+    symbol: bitgetSymbol(symbol), productType: "USDT-FUTURES", granularity: g.g, endTime: before - 1, limit: 200,
+  });
+  return toCandles(rows).filter((c) => c.t < before).sort((a, b) => a.t - b.t);
+}
+
 /** Candles from `start` to now, oldest first, fetched in pages of up to 1000. */
 export async function candlesSince(symbol: string, tf: string, start: number, maxPages = 4): Promise<Candle[]> {
   const g = GRANULARITY[tf];

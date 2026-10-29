@@ -2,6 +2,7 @@
 // against fake Bitget candles and a fake Telegram.
 import assert from "node:assert/strict";
 import { legFibs } from "../lib/autofib";
+import { weeklyFromDaily } from "../lib/candle-store";
 import { fibLevels, firstTouch } from "../lib/fibs";
 import { swingStructure } from "../lib/structure";
 import { analyzeTrend, type Candle } from "../lib/trend";
@@ -90,6 +91,14 @@ assert.equal(fibsNow[0].anchorT, legs.find((c) => c.l === fibsNow[0].low)!.t);
 const broken = path([100, 80, 95, 70, 90, 120, 100, 130, 105, 115, 95, 108, 65], 8, H);
 assert.deepEqual(legFibs(broken, swingStructure(broken, 4)).map((f) => f.direction), ["bear"]);
 
+// Weekly candles from daily ones: Monday to Sunday UTC, and the week still running is left out
+const DAY = 24 * H;
+const mon = Date.UTC(2026, 9, 5); // Monday 5 Oct 2026
+const days = Array.from({ length: 17 }, (_, i) => ({ t: mon + i * DAY, o: 10 + i, h: 20 + i, l: 5 + i, c: 11 + i }));
+const weeks = weeklyFromDaily(days, mon + 16.5 * DAY);
+assert.deepEqual(weeks.map((w) => [new Date(w.t).toISOString().slice(0, 10), w.o, w.h, w.l, w.c]),
+  [["2026-10-05", 10, 26, 5, 17], ["2026-10-12", 17, 33, 12, 24]]);
+
 // Your examples: 1H/2H/4H are linear with 0.5/0.618/0.786; 1D/1W are log scale and add 0.382
 // (the 1D/1W anchors are read off the chart, so those levels are checked to within 0.05%)
 const near = (f: Parameters<typeof fibLevels>[0], want: number[]) => {
@@ -143,7 +152,7 @@ async function e2e() {
     return realFetch(input, init);
   }) as typeof fetch;
 
-  await sql().unsafe("DROP TABLE IF EXISTS fib_runs, fib_hits, fibs, trends, settings, alerts, ticks, sightings, signals, uploads, corrections");
+  await sql().unsafe("DROP TABLE IF EXISTS candles, candle_sets, fib_runs, fib_hits, fibs, trends, settings, alerts, ticks, sightings, signals, uploads, corrections");
   const s = await db();
   const goldTime = new Date(priceDrop[15].t);
   const bosTime = new Date(priceDrop[36].t);
@@ -199,16 +208,39 @@ async function e2e() {
   sum = await tick(s);
   assert.equal(sum.fibsRedrawn, 5);
   let auto = await s`SELECT tf, direction, low, high, forming, active FROM fibs WHERE source = 'auto' ORDER BY tf, direction`;
-  assert.equal(auto.length, 10);
+  assert.equal(auto.length, 8); // 1H, 2H, 4H, 1D (1W is built from these daily candles: too few weeks here)
   assert.ok(auto.every((f) => f.active && (f.direction === "bull" ? !f.forming && f.low < 70 : f.forming && f.low < 95)));
   // Redrawn after a close below the up leg's start: the green fibs end, the red ones stay
   legPoints = [...legPoints, 65];
   legsEarly = 0;
   await s`DELETE FROM fib_runs`;
   await tick(s);
-  auto = await s`SELECT direction, active, ended_at FROM fibs WHERE source = 'auto'`;
-  assert.equal(auto.length, 10);
+  auto = await s`SELECT direction, active, ended_at FROM fibs WHERE source = 'auto' AND tf <> '1W'`;
+  assert.equal(auto.length, 8);
   assert.ok(auto.every((f) => (f.direction === "bull") === !f.active && (f.direction === "bull") === !!f.ended_at));
+
+  // Older daily candles are paged in a few at a time (Bitget serves 90 days per call) and kept
+  const { storedCandles } = await import("../lib/candle-store");
+  const D = 24 * H, today = Math.floor(now / D) * D;
+  const series = Array.from({ length: 400 }, (_, i) => ({ t: today - (399 - i) * D, o: i, h: i + 1, l: i - 1, c: i }));
+  const tickFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = new URL(String(input instanceof Request ? input.url : input));
+    const end = url.pathname.endsWith("history-candles") ? +url.searchParams.get("endTime")! : now;
+    const rows = series.filter((c) => c.t <= end).slice(-90);
+    return Response.json({ code: "00000", data: rows.map((c) => [String(c.t), String(c.o), String(c.h), String(c.l), String(c.c), "1", "1"]) });
+  }) as typeof fetch;
+  await s`DELETE FROM candles`;
+  await s`DELETE FROM candle_sets`;
+  let st = await storedCandles(s, "TESTUSDT.P", "1D", 280, 2);
+  assert.equal(st.complete, false);
+  assert.equal(st.candles.length, 269); // 89 closed recent + 2 pages of 90
+  st = await storedCandles(s, "TESTUSDT.P", "1D", 280, 2);
+  assert.equal(st.complete, true);
+  assert.equal(st.candles.length, 280);
+  assert.ok(st.candles.every((c, i) => !i || c.t - st.candles[i - 1].t === D));
+  assert.equal(st.candles.at(-1)!.t, today - D); // today's candle is still forming
+  globalThis.fetch = tickFetch;
 
   // ── capture health ──
   const { captureReport, checkStale } = await import("../lib/health");
