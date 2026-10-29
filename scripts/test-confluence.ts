@@ -2,6 +2,7 @@
 // against fake Bitget candles and a fake Telegram.
 import assert from "node:assert/strict";
 import { fibLevels, firstTouch } from "../lib/fibs";
+import { swingStructure } from "../lib/structure";
 import { analyzeTrend, type Candle } from "../lib/trend";
 
 /** Straight-line legs between turning points, `leg` bars each, as candles one `step` apart ending at `end`. */
@@ -70,7 +71,7 @@ assert.equal(firstTouch(path([100, 95], 10, 60_000), bull, 0, 0), null);
 assert.ok(firstTouch(path([100, 90.1], 10, 60_000), bull, 0, 0.15));
 
 // ── swing structure (LuxAlgo SMC rules, swing length 4 here) ──
-const { swingStructure } = await import("../lib/structure");
+
 const st = swingStructure(path([120, 100, 115, 90, 105, 85, 100, 125, 110, 130], 8, H), 4);
 assert.deepEqual(st.highs.map((p) => +p.price.toFixed(2)), [115.01, 105.01, 125.01]);
 assert.deepEqual(st.lows.map((p) => +p.price.toFixed(2)), [99.99, 89.99, 84.99, 109.99]);
