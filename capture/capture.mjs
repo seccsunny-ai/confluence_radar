@@ -175,7 +175,7 @@ async function readPineLogs(page, k, notes, found) {
 
 /**
  * Opens Pine Logs for every indicator on the chart through its legend's "More" menu. A log that never loads
- * usually comes through after reloading the page, so each indicator gets up to `logsReloads` reloads.
+ * usually comes through after reloading the page, so each indicator gets up to `logsRetries` reloads.
  */
 async function openPineLogs(page, notes, found) {
   await expandLegend(page, notes);
@@ -190,10 +190,11 @@ async function openPineLogs(page, notes, found) {
         notes.push(`legend ${k}: ${e.message.split("\n")[0]}`);
         await page.keyboard.press("Escape").catch(() => {});
       }
-      if (got !== 0 || attempt >= (config.logsReloads ?? 2)) break;
+      if (got !== 0 || attempt >= (config.logsRetries ?? 2)) break;
       notes.push(`legend ${k}: no log, reloading the page`);
       await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
-      await page.waitForTimeout(15000);
+      await page.locator("canvas").first().waitFor({ timeout: 30000 }).catch(() => {});
+      await page.waitForTimeout((config.refreshWaitSeconds ?? 15) * 1000);
       await page.keyboard.press("Escape").catch(() => {});
       await expandLegend(page, notes);
     }
@@ -295,12 +296,7 @@ async function main() {
   for (const layout of config.layouts) {
     try {
       if (layout.mode === "pine") {
-        let entries = await capturePine(layout);
-        if (!entries.length) {
-          // The Pine Logs panel sometimes keeps loading forever; a fresh browser usually gets it.
-          log(`${layout.name}: no entries, trying once more`);
-          entries = await capturePine(layout);
-        }
+        const entries = await capturePine(layout);
         if (!entries.length) {
           throw new Error("No Confluence Radar entries in Pine Logs. Check that the export version of the screener is on this layout " +
             `(see pine/README.md), and look at shots/${layout.name}.png. Raising waitSeconds can help.`);
