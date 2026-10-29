@@ -90,7 +90,12 @@ function entriesInFrame(payload, found) {
   const text = typeof payload === "string" ? payload : payload.toString("utf8");
   if (!text.includes("Confluence Radar")) return;
   const walk = (v) => {
-    if (typeof v === "string") { if (v.includes(MARK)) found.add(v.slice(v.indexOf(MARK))); }
+    if (typeof v === "string") {
+      if (!v.includes(MARK)) return;
+      // Log text can arrive as JSON nested inside a string; unescape it before reading.
+      if (/^\s*[{[]/.test(v)) { try { return walk(JSON.parse(v)); } catch { /* plain text */ } }
+      found.add(v.slice(v.indexOf(MARK)).trim());
+    }
     else if (Array.isArray(v)) v.forEach(walk);
     else if (v && typeof v === "object") Object.values(v).forEach(walk);
   };
@@ -115,32 +120,44 @@ function entriesInText(text, found) {
 const DEBUG = process.argv.includes("--debug") || config.debug === true;
 
 /** Opens Pine Logs for every indicator on the chart through its legend's "More" menu. */
-async function openPineLogs(page, notes) {
-  // A collapsed legend ("⌄ 3") hides the indicators; expand it first.
+async function openPineLogs(page, notes, found) {
+  const items = page.locator('[data-name="legend-source-item"], [data-qa-id="legend-source-item"]');
+  // A collapsed legend ("⌄ 3") hides the indicators; expand it first. The toggler also collapses an open legend,
+  // so it is only clicked when the indicators are hidden.
   const toggle = page.locator('[data-name="legend-toggler"], [data-qa-id="legend-toggler"], [aria-label*="Show indicator legend" i]').first();
-  if (await toggle.isVisible({ timeout: 1000 }).catch(() => false)) {
+  if (!(await items.last().isVisible({ timeout: 1000 }).catch(() => false)) && await toggle.isVisible({ timeout: 1000 }).catch(() => false)) {
     await toggle.click().catch(() => {});
     notes.push("expanded the collapsed legend");
     await page.waitForTimeout(500);
   }
-  const items = page.locator('[data-name="legend-source-item"], [data-qa-id="legend-source-item"]');
   const n = await items.count();
   notes.push(`legend items: ${n}`);
   for (let k = 0; k < n; k++) {
     const item = items.nth(k);
     const title = (await item.innerText().catch(() => "")).split("\n")[0];
     try {
-      await item.hover();
+      // The screener tables sit over the legend and catch the pointer, so hover and click are forced.
+      await item.hover({ force: true, timeout: 5000 });
       const more = item.locator('[data-name="legend-more-action"], [data-qa-id="legend-more-action"], [aria-label="More"]').first();
-      await more.click({ timeout: 3000 });
+      await more.click({ force: true, timeout: 3000 });
       await page.waitForTimeout(500);
       const menu = await page.locator('[role="menu"], [data-name="menu-inner"], [class*="menu"]').allInnerTexts().catch(() => []);
       notes.push(`legend ${k} "${title}": menu = ${JSON.stringify(menu.join(" | ").slice(0, 600))}`);
       const entry = page.getByText(/Pine Logs/i).first();
       if (await entry.isVisible({ timeout: 2000 }).catch(() => false)) {
+        const before = found.size;
         await entry.click();
-        notes.push(`legend ${k}: clicked Pine Logs`);
-        await page.waitForTimeout(4000);
+        // Opening Pine Logs re-runs the screener, which takes a while before any log appears.
+        const panel = new Set();
+        const deadline = Date.now() + (config.logsWaitSeconds ?? 60) * 1000;
+        while (Date.now() < deadline) {
+          await page.waitForTimeout(2000);
+          entriesInText(await page.locator("body").innerText().catch(() => ""), panel);
+          if (found.size > before || panel.size) break;
+        }
+        const fromNetwork = found.size > before;
+        if (!fromNetwork) panel.forEach((e) => found.add(e));
+        notes.push(`legend ${k}: ${fromNetwork ? found.size - before : panel.size} entries (${fromNetwork ? "network" : "panel"})`);
       } else {
         notes.push(`legend ${k}: no Pine Logs item`);
         await page.keyboard.press("Escape");
@@ -165,19 +182,27 @@ async function capturePine(layout) {
       if (/pine|log|Confluence/i.test(text)) frames.interesting.push(`${ws.url()}\n${text.slice(0, 3000)}`);
     }
   };
+  // Some logs come back as plain HTTP responses rather than websocket frames.
+  const onResponse = async (res) => {
+    if (!/tradingview\.com/.test(res.url()) || !/json|text/.test(res.headers()["content-type"] ?? "")) return;
+    const text = await res.text().catch(() => "");
+    if (!text.includes(MARK)) return;
+    entriesInFrame(text, found);
+    notes.push(`entries in response ${res.url()}`);
+  };
   const watch = (p) => p.on("websocket", (ws) => { frames.urls.add(ws.url()); ws.on("framereceived", onFrame(ws)); });
   try {
     // The logs reach the browser over TradingView's websocket, so listen before the chart loads.
     ctx.on("page", watch);
+    ctx.on("response", onResponse);
     ctx.pages().forEach(watch);
     const page = await openLayout(ctx, layout);
     await page.waitForTimeout((config.waitSeconds ?? 25) * 1000);
     await page.keyboard.press("Escape");
     notes.push(`entries from websocket: ${found.size}`);
     if (!found.size || DEBUG) {
-      await openPineLogs(page, notes);
+      await openPineLogs(page, notes, found);
       const body = await page.locator("body").innerText();
-      entriesInText(body, found);
       notes.push(`entries after opening Pine Logs: ${found.size}`);
       if (DEBUG) notes.push("page text lines mentioning Pine or Confluence:", ...body.split("\n").filter((l) => /pine|confluence/i.test(l)).slice(0, 50));
     }
@@ -196,7 +221,16 @@ async function capturePine(layout) {
 }
 
 function authHeaders() {
-  return config.password ? { authorization: "Basic " + Buffer.from(`radar:${config.password}`).toString("base64") } : {};
+  const h = config.password ? { authorization: "Basic " + Buffer.from(`radar:${config.password}`).toString("base64") } : {};
+  if (config.vercelBypass) h["x-vercel-protection-bypass"] = config.vercelBypass;
+  return h;
+}
+
+/** The site's own errors are strings; Vercel's (e.g. a protected deployment) are objects. */
+function uploadError(res, json) {
+  const e = json.error;
+  const msg = typeof e === "string" ? e : e?.message ?? e?.code;
+  return new Error(`HTTP ${res.status}${msg ? ": " + msg : ""}${res.status === 401 ? " (Vercel Authentication? Use the project's main .vercel.app address.)" : ""}`);
 }
 
 async function uploadText(entries) {
@@ -206,7 +240,7 @@ async function uploadText(entries) {
     body: JSON.stringify({ text: entries.join("\n\n") }),
   });
   const json = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-  if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+  if (!res.ok) throw uploadError(res, json);
   return json; // one result per screener
 }
 
@@ -219,7 +253,7 @@ async function upload(layout, png, capturedAt) {
   body.append("structureTz", layout.tz ?? "+00:00");
   const res = await fetch(new URL("/api/upload", config.site), { method: "POST", body, headers: authHeaders() });
   const json = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-  if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+  if (!res.ok) throw uploadError(res, json);
   return json;
 }
 
