@@ -1,10 +1,16 @@
-// Fib retracement levels drawn by the user, and finding when price first touches one.
+// Fib retracement levels (drawn by the user, or from the swing structure in autofib.ts), and finding when price
+// first touches one.
 import { z } from "zod";
 import { normalizeTf } from "./signals";
 import type { Candle } from "./trend";
 
-export const FIB_RATIOS = [0.5, 0.618, 0.786] as const;
-export const FIB_TFS = ["1h", "4h"];
+export const FIB_RATIOS = [0.5, 0.618, 0.786];
+const HTF_RATIOS = [0.382, 0.5, 0.618, 0.786];
+export const FIB_TFS = ["1h", "4h"]; // timeframes for fibs entered by hand
+// Daily and weekly fibs are drawn on a log chart, so their levels are spaced by percentage rather than price.
+export const LOG_TFS = ["1D", "1W"];
+
+export const fibRatios = (tf?: string) => (tf && LOG_TFS.includes(tf) ? HTF_RATIOS : FIB_RATIOS);
 
 export interface Fib {
   id: number;
@@ -13,18 +19,22 @@ export interface Fib {
   direction: "bull" | "bear"; // green = bullish retest (buy), red = bearish retest (sell)
   high: number;
   low: number;
+  source?: "manual" | "auto";
+  forming?: boolean; // auto: the leg is still running, so its far end can still move
 }
 
 /**
  * A bullish fib is drawn from the swing low up to the swing high, so its retracement levels sit below the high.
  * A bearish fib is drawn from the swing high down to the low, so its levels sit above the low.
+ * 1D and 1W get the 0.382 too, and log-scale levels (as TradingView draws them on a log chart).
  */
-export function fibLevels(f: Pick<Fib, "direction" | "high" | "low">): Array<{ ratio: number; price: number }> {
-  const range = f.high - f.low;
-  return FIB_RATIOS.map((ratio) => ({
-    ratio,
-    price: f.direction === "bull" ? f.high - ratio * range : f.low + ratio * range,
-  }));
+export function fibLevels(f: Pick<Fib, "direction" | "high" | "low"> & { tf?: string }): Array<{ ratio: number; price: number }> {
+  const log = !!f.tf && LOG_TFS.includes(f.tf);
+  const [hi, lo] = log ? [Math.log(f.high), Math.log(f.low)] : [f.high, f.low];
+  return fibRatios(f.tf).map((ratio) => {
+    const p = f.direction === "bull" ? hi - ratio * (hi - lo) : lo + ratio * (hi - lo);
+    return { ratio, price: log ? Math.exp(p) : p };
+  });
 }
 
 export interface Touch { t: number; ratio: number; level: number }

@@ -67,6 +67,7 @@ export function CheckBar({ fmt, onDone }: { fmt: Fmt; onDone: () => void }) {
 interface FibSignal {
   gold_id: number; symbol: string; tf: string; code: string; direction: string; signal_time: string; window_end: string;
   fib_id: number; fib_tf: string; high: number; low: number; note: string | null; active: boolean;
+  fib_source: "manual" | "auto"; forming: boolean;
   ratio: number | null; level: number | null; touched_at: string | null; at_signal: boolean | null;
   structure_id: number | null; structure_tf: string | null; structure_code: string | null; structure_time: string | null;
   status: "stronger" | "touched" | "waiting" | "expired";
@@ -96,8 +97,9 @@ export function FibSignals({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
       <div className="panel filters">
         <CheckBar fmt={fmt} onDone={() => setN((x) => x + 1)} />
         <div className="muted small">
-          After a Gold Buy the site watches the symbol&apos;s green fibs (red fibs for a Gold Sell) until price reaches 0.5, 0.618 or 0.786.
-          A same-direction BOS or CHoCH after that touch makes it the stronger signal. Add your fibs on the My fibs tab.
+          After a Gold Buy the site watches the symbol&apos;s green fibs (red fibs for a Gold Sell) until price reaches 0.5, 0.618 or 0.786
+          (also 0.382 on 1D and 1W). A same-direction BOS or CHoCH after that touch makes it the stronger signal.
+          Fibs are drawn automatically from the swing structure on 1H, 2H, 4H, 1D and 1W; you can add your own on the Fibs tab.
         </div>
         <div className="row">
           <select value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -119,7 +121,7 @@ export function FibSignals({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
       <div className="panel tablewrap">
         {err && <div className="status-err">{err}</div>}
         {shown && shown.length === 0 ? (
-          <div className="empty">No Gold signals on symbols you have fibs for. Add fibs on the My fibs tab.</div>
+          <div className="empty">No Gold signals on symbols with a matching fib yet.</div>
         ) : (
           <table>
             <thead><tr><th>Status</th><th>Symbol</th><th>Gold</th><th>Fib</th><th>Touch</th><th>Then BOS/CHoCH</th></tr></thead>
@@ -131,7 +133,8 @@ export function FibSignals({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
                   <td className="nowrap"><Sig code={r.code} /> {tfLabel(r.tf)}<div className="small muted">{fmt(r.signal_time)}</div></td>
                   <td className="nowrap">
                     <span className={r.direction === "bull" ? "sig bull" : "sig bear"}>{tfLabel(r.fib_tf)} {r.direction === "bull" ? "green" : "red"}</span>
-                    <div className="small muted">{fibLevels({ direction: r.direction as "bull" | "bear", high: r.high, low: r.low }).map((l) => price(l.price)).join(" / ")}</div>
+                    {r.fib_source === "auto" && <span className="small muted"> auto{r.forming ? ", forming" : ""}</span>}
+                    <div className="small muted">{fibLevels({ direction: r.direction as "bull" | "bear", high: r.high, low: r.low, tf: r.fib_tf }).map((l) => price(l.price)).join(" / ")}</div>
                     {r.note && <div className="small muted">{r.note}</div>}
                   </td>
                   <td className="nowrap">
@@ -226,20 +229,28 @@ export function Trends({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
   );
 }
 
-// ─────────────────────────────── My fibs ───────────────────────────────
+// ─────────────────────────────── Fibs ───────────────────────────────
 
-interface FibRow { id: number; symbol: string; tf: string; direction: "bull" | "bear"; high: number; low: number; note: string | null; active: boolean; created_at: string; price: number | null }
+interface FibRow {
+  id: number; symbol: string; tf: string; direction: "bull" | "bear"; high: number; low: number; note: string | null; active: boolean;
+  created_at: string; price: number | null; source: "manual" | "auto"; forming: boolean;
+  anchor_t: string | null; high_t: string | null; low_t: string | null; ended_at: string | null;
+}
 
 const EMPTY = { symbol: "", tf: "1h", direction: "bull", high: "", low: "", note: "" };
 
-export function Fibs({ refresh }: { refresh: number }) {
+export function Fibs({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
   const [rows, setRows] = useState<FibRow[] | null>(null);
+  const [symbol, setSymbol] = useState("");
+  const [kind, setKind] = useState("");
+  const [tf, setTf] = useState("");
   const [form, setForm] = useState(EMPTY);
   const [editing, setEditing] = useState<number | null>(null);
   const [err, setErr] = useState("");
   const [n, setN] = useState(0);
   useEffect(() => { getJson<FibRow[]>("/api/fibs").then(setRows).catch((e) => setErr(e.message)); }, [refresh, n]);
   const set = (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [k]: e.target.value });
+  const shown = rows?.filter((f) => (!symbol || f.symbol.includes(symbol.toUpperCase())) && (!kind || f.source === kind) && (!tf || f.tf === tf));
   const preview = Number(form.high) > Number(form.low) && Number(form.low) > 0
     ? fibLevels({ direction: form.direction as "bull" | "bear", high: Number(form.high), low: Number(form.low) }) : null;
 
@@ -270,8 +281,12 @@ export function Fibs({ refresh }: { refresh: number }) {
     <>
       <form className="panel" onSubmit={submit}>
         <div className="muted small" style={{ marginBottom: 8 }}>
-          Copy each fib you draw in TradingView: the swing high and swing low it&apos;s anchored to. Green fibs look for a bullish retest after a Gold Buy,
-          red fibs a bearish retest after a Gold Sell. Switch a fib off when it no longer applies.
+          Fibs are drawn automatically on 1H, 2H, 4H, 1D and 1W from the swing structure (LuxAlgo SMC, swing length 50) of every symbol with a signal
+          in the last 7 days. Each swing leg between two CHoCHs gets one: an up leg a green fib from its low to its high (bullish retest after a Gold Buy),
+          a down leg a red fib from its high to its low (bearish retest after a Gold Sell). A fib stays until a candle on its timeframe closes beyond the
+          leg&apos;s start: below a green fib&apos;s low, above a red fib&apos;s high. 1D and 1W levels are on a log scale and include 0.382.
+          &quot;Forming&quot; means the leg is still running, so its far end can still move.
+          You can also add a fib you drew yourself: copy the swing high and swing low it&apos;s anchored to.
         </div>
         <div className="row">
           <input type="text" placeholder="Symbol, e.g. BTCUSDT.P" value={form.symbol} onChange={set("symbol")} required />
@@ -289,26 +304,49 @@ export function Fibs({ refresh }: { refresh: number }) {
         {preview && <div className="small muted" style={{ marginTop: 6 }}>Levels: {preview.map((l) => `${l.ratio} = ${price(l.price)}`).join(" · ")}</div>}
         {err && <div className="status-err">{err}</div>}
       </form>
+      <div className="panel filters">
+        <div className="row">
+          <input type="text" placeholder="Symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)} />
+          <select value={tf} onChange={(e) => setTf(e.target.value)}>
+            <option value="">All timeframes</option>
+            {["1h", "2h", "4h", "1D", "1W"].map((t) => <option key={t} value={t}>{tfLabel(t)}</option>)}
+          </select>
+          <select value={kind} onChange={(e) => setKind(e.target.value)}>
+            <option value="">Auto and mine</option>
+            <option value="auto">Auto only</option>
+            <option value="manual">Mine only</option>
+          </select>
+          {shown && <span className="small muted">{shown.filter((f) => f.active).length} active</span>}
+        </div>
+      </div>
       <div className="panel tablewrap">
-        {rows && rows.length === 0 ? <div className="empty">No fibs yet.</div> : (
+        {shown && shown.length === 0 ? <div className="empty">No fibs yet. They&apos;re drawn on the next check.</div> : (
           <table>
-            <thead><tr><th>Symbol</th><th>Fib</th><th>High / low</th><th>0.5 · 0.618 · 0.786</th><th>Price now</th><th></th></tr></thead>
+            <thead><tr><th>Symbol</th><th>Fib</th><th>High / low</th><th>Levels</th><th>Price now</th><th></th></tr></thead>
             <tbody>
-              {rows?.map((f) => (
+              {shown?.map((f) => (
                 <tr key={f.id} style={f.active ? undefined : { opacity: 0.5 }}>
                   <td><b>{f.symbol}</b>{f.note && <div className="small muted">{f.note}</div>}</td>
-                  <td className="nowrap"><span className={`sig ${f.direction}`}>{tfLabel(f.tf)} {f.direction === "bull" ? "green" : "red"}</span></td>
-                  <td className="nowrap">{price(f.high)} / {price(f.low)}</td>
+                  <td className="nowrap">
+                    <span className={`sig ${f.direction}`}>{tfLabel(f.tf)} {f.direction === "bull" ? "green" : "red"}</span>
+                    <div className="small muted">
+                      {f.source === "auto" ? (f.active ? (f.forming ? "auto, leg forming" : "auto") : `auto, broken ${f.ended_at ? fmt(f.ended_at) : ""}`) : "mine"}
+                    </div>
+                  </td>
+                  <td className="nowrap">
+                    {price(f.high)} / {price(f.low)}
+                    {f.high_t && f.low_t && <div className="small muted">{fmt(f.high_t)} / {fmt(f.low_t)}</div>}
+                  </td>
                   <td className="nowrap">{fibLevels(f).map((l) => {
                     const dist = f.price ? ((f.price - l.price) / l.price) * 100 : null;
                     return <div key={l.ratio}>{l.ratio}: {price(l.price)}{dist != null && <span className="small muted"> ({dist > 0 ? "+" : ""}{dist.toFixed(2)}%)</span>}</div>;
                   })}</td>
                   <td>{price(f.price)}</td>
-                  <td className="nowrap">
+                  <td className="nowrap">{f.source === "manual" && <>
                     <button className="btn small" onClick={() => { setEditing(f.id); setForm({ symbol: f.symbol, tf: f.tf, direction: f.direction, high: String(f.high), low: String(f.low), note: f.note ?? "" }); }}>Edit</button>{" "}
                     <button className="btn small" onClick={() => act(f, "toggle")}>{f.active ? "Switch off" : "Switch on"}</button>{" "}
                     <button className="btn danger small" onClick={() => act(f, "delete")}>Delete</button>
-                  </td>
+                  </>}</td>
                 </tr>
               ))}
             </tbody>

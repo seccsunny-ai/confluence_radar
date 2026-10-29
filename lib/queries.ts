@@ -113,12 +113,16 @@ export async function listTrends(sql: postgres.Sql) {
   return sql`SELECT symbol, tf, trend, potential, since, last_high, last_low, price, note, updated_at FROM trends ORDER BY symbol`;
 }
 
-/** Active fibs first, with the latest 15m price so the page can show how far each level is. */
+/**
+ * Active fibs first, with the latest 15m price so the page can show how far each level is. Auto fibs that price
+ * broke are kept for 3 days.
+ */
 export async function listFibs(sql: postgres.Sql) {
   return sql`
     SELECT f.*, t.price, t.updated_at AS price_at FROM fibs f
     LEFT JOIN trends t ON t.symbol = f.symbol AND t.tf = '15m'
-    ORDER BY f.active DESC, f.symbol, f.tf, f.created_at DESC`;
+    WHERE f.source = 'manual' OR f.active OR f.ended_at > now() - interval '3 days'
+    ORDER BY f.active DESC, f.symbol, array_position(ARRAY['1h','2h','4h','1D','1W'], f.tf), f.anchor_t DESC NULLS FIRST, f.created_at DESC`;
 }
 
 /**
@@ -131,7 +135,7 @@ export async function fibSignals(sql: postgres.Sql, sinceDays = 14) {
   );
   const rows = await sql`
     SELECT g.id AS gold_id, g.symbol, g.tf, g.code, g.direction, g.signal_time, g.signal_time + ${windowCase} AS window_end,
-      f.id AS fib_id, f.tf AS fib_tf, f.high, f.low, f.note, f.active,
+      f.id AS fib_id, f.tf AS fib_tf, f.high, f.low, f.note, f.active, f.source AS fib_source, f.forming,
       h.ratio, h.level, h.touched_at, h.at_signal,
       s.id AS structure_id, s.tf AS structure_tf, s.code AS structure_code, s.signal_time AS structure_time
     FROM signals g

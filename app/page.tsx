@@ -582,7 +582,7 @@ export default function Page() {
     ["matches", "Gold → BOS/CHoCH"],
     ["fib", "Gold → Fib"],
     ["trends", "Trends"],
-    ["fibs", "My fibs"],
+    ["fibs", "Fibs"],
     ["signals", "Signals"],
     ["symbols", "Symbols"],
     ["uploads", "Uploads"],
@@ -609,7 +609,7 @@ export default function Page() {
       {tab === "matches" && <Matches fmt={fmt} refresh={refresh} />}
       {tab === "fib" && <FibSignals fmt={fmt} refresh={refresh} />}
       {tab === "trends" && <Trends fmt={fmt} refresh={refresh} />}
-      {tab === "fibs" && <Fibs refresh={refresh} />}
+      {tab === "fibs" && <Fibs fmt={fmt} refresh={refresh} />}
       {tab === "alerts" && <Alerts fmt={fmt} />}
       {tab === "signals" && <Signals fmt={fmt} refresh={refresh} />}
       {tab === "symbols" && <Symbols fmt={fmt} refresh={refresh} />}

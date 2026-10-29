@@ -1,6 +1,7 @@
-// The periodic check: refreshes trends from live candles, looks for Gold signals reaching a matching fib (and a
-// BOS/CHoCH after that), and sends Telegram alerts for anything new.
+// The periodic check: refreshes trends and the auto fibs from live candles, looks for Gold signals reaching a
+// matching fib (and a BOS/CHoCH after that), and sends Telegram alerts for anything new.
 import type postgres from "postgres";
+import { AUTO_FIB_TFS, legFibs } from "./autofib";
 import { fibLevels, firstTouch, type Fib } from "./fibs";
 import { candlesSince, recentCandles, TF_MS } from "./market";
 import { GOLD_WINDOW_DAYS, SIGNAL_BY_CODE } from "./signals";
@@ -16,6 +17,7 @@ const ALERT_TZ = process.env.ALERT_TZ || "Asia/Kolkata";
 export interface TickSummary {
   symbols: number;
   trendsUpdated: number;
+  fibsRedrawn: number; // symbol and timeframe pairs whose auto fibs were worked out again
   fibHits: number;
   structureAfterFib: number;
   alertsSent: number;
@@ -47,7 +49,7 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   const started = Date.now();
   const settings = await alertSettings(sql);
   const errors: string[] = [];
-  let alertsSent = 0, trendsUpdated = 0, fibHits = 0, structureAfterFib = 0;
+  let alertsSent = 0, trendsUpdated = 0, fibsRedrawn = 0, fibHits = 0, structureAfterFib = 0;
 
   const alert = async (enabled: boolean, key: string, html: string, isRecent: boolean) => {
     if (!enabled || !isRecent || !telegramReady()) return;
@@ -65,7 +67,7 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   // ── Trends ──
   const symbols = (await sql`
     SELECT symbol FROM signals WHERE signal_time > now() - make_interval(days => ${TRACK_DAYS})
-    UNION SELECT symbol FROM fibs WHERE active`).map((r) => r.symbol as string);
+    UNION SELECT symbol FROM fibs WHERE active AND source = 'manual'`).map((r) => r.symbol as string);
   const previous = new Map<string, postgres.Row>();
   for (const r of await sql`SELECT * FROM trends`) previous.set(`${r.symbol}|${r.tf}`, r);
 
@@ -110,11 +112,54 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
     }).join(" · ");
   };
 
+  // ── Fibs from each timeframe's swing structure, redone after each new candle close ──
+  const lastRun = new Map<string, number>();
+  for (const r of await sql`SELECT * FROM fib_runs`) lastRun.set(`${r.symbol}|${r.tf}`, new Date(r.last_closed).getTime());
+  const due = symbols.flatMap((s) => AUTO_FIB_TFS.map((tf) => [s, tf] as const)).filter(([s, tf]) => {
+    const last = lastRun.get(`${s}|${tf}`);
+    return last == null || Date.now() >= last + 2 * TF_MS[tf]; // the candle after the last closed one has closed
+  });
+  await pool(due, 4, async ([symbol, tf]) => {
+    let candles: Candle[];
+    try {
+      candles = (await recentCandles(symbol, tf, 1000)).slice(0, -1); // the last one is still forming
+    } catch (e) {
+      errors.push(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    if (!candles.length) return;
+    const legs = legFibs(candles);
+    const ids: number[] = [];
+    for (const f of legs) {
+      const [row] = await sql`
+        INSERT INTO fibs (symbol, tf, direction, high, low, source, anchor_t, high_t, low_t, forming)
+        VALUES (${symbol}, ${tf}, ${f.direction}, ${f.high}, ${f.low}, 'auto', ${new Date(f.anchorT)},
+          ${new Date(f.highT)}, ${new Date(f.lowT)}, ${f.forming})
+        ON CONFLICT (symbol, tf, direction, anchor_t) WHERE source = 'auto' DO UPDATE SET high = EXCLUDED.high,
+          low = EXCLUDED.low, high_t = EXCLUDED.high_t, low_t = EXCLUDED.low_t, forming = EXCLUDED.forming,
+          active = true, ended_at = NULL
+        RETURNING id`;
+      ids.push(row.id);
+    }
+    // Broken since (a leg that started before the candles we have can't be checked, so it stays)
+    await sql`
+      UPDATE fibs SET active = false, forming = false, ended_at = now()
+      WHERE source = 'auto' AND symbol = ${symbol} AND tf = ${tf} AND active AND anchor_t >= ${new Date(candles[0].t)}
+        ${ids.length ? sql`AND id NOT IN ${sql(ids)}` : sql``}`;
+    await sql`
+      INSERT INTO fib_runs (symbol, tf, last_closed) VALUES (${symbol}, ${tf}, ${new Date(candles[candles.length - 1].t)})
+      ON CONFLICT (symbol, tf) DO UPDATE SET last_closed = EXCLUDED.last_closed`;
+    fibsRedrawn++;
+  });
+
   // ── Gold signals reaching a matching fib ──
   const windowCase = sql.unsafe(
     "CASE g.tf " + Object.entries(GOLD_WINDOW_DAYS).map(([tf, d]) => `WHEN '${tf}' THEN interval '${d} days'`).join(" ") + " END",
   );
   const fibs = (await sql`SELECT * FROM fibs WHERE active`) as unknown as Array<Fib & { note: string | null }>;
+  const fibName = (f: { tf: string; direction: string; source?: string; forming?: boolean; high: number; low: number }) =>
+    `${tfLabel(f.tf)} ${f.direction === "bull" ? "🟢 green" : "🔴 red"} fib` +
+    (f.source === "auto" ? ` (${f.direction === "bull" ? `${fmtPrice(f.low)} → ${fmtPrice(f.high)}` : `${fmtPrice(f.high)} → ${fmtPrice(f.low)}`}${f.forming ? ", leg still forming" : ""})` : "");
   const golds = await sql`
     SELECT g.*, g.signal_time + ${windowCase} AS window_end FROM signals g
     WHERE g.family = 'gold' AND g.tf IN ${sql(Object.keys(GOLD_WINDOW_DAYS))}
@@ -149,7 +194,7 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
       const gold = SIGNAL_BY_CODE[g.code];
       await alert(settings.fibTouch, `fib:${g.id}:${f.id}`,
         `🎯 <b>${esc(symbol)}</b> ${tfLabel(g.tf)} <b>${gold.name}</b> (${when(g.signal_time)})\n` +
-        `Price ${atSignal ? "was at" : "touched"} the ${tfLabel(f.tf)} ${f.direction === "bull" ? "🟢 green" : "🔴 red"} fib <b>${touch.ratio}</b> = ${fmtPrice(touch.level)} at ${when(touch.t)}` +
+        `Price ${atSignal ? "was at" : "touched"} the ${fibName(f)} <b>${touch.ratio}</b> = ${fmtPrice(touch.level)} at ${when(touch.t)}` +
         `${f.note ? ` (${esc(f.note)})` : ""}\nTrend: ${await trendLine(symbol)}`,
         recent(touch.t, g.first_seen_at));
     }
@@ -158,7 +203,7 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   // ── BOS/CHoCH after a fib touch: the stronger signal ──
   const open = await sql`
     SELECT h.*, g.symbol, g.tf AS gold_tf, g.code AS gold_code, g.direction, g.signal_time AS gold_time,
-      g.signal_time + ${windowCase} AS window_end, f.tf AS fib_tf, f.direction AS fib_dir
+      g.signal_time + ${windowCase} AS window_end, f.tf AS fib_tf, f.direction AS fib_dir, f.source AS fib_source
     FROM fib_hits h JOIN signals g ON g.id = h.gold_id JOIN fibs f ON f.id = h.fib_id
     WHERE h.structure_id IS NULL AND g.signal_time + ${windowCase} > now() - interval '1 hour'`;
   for (const h of open) {
@@ -173,7 +218,7 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
     structureAfterFib++;
     await alert(settings.fibStructure, `fibs:${h.gold_id}:${h.fib_id}`,
       `💥 <b>Stronger: ${esc(h.symbol)}</b> ${tfLabel(h.gold_tf)} <b>${SIGNAL_BY_CODE[h.gold_code].name}</b> (${when(h.gold_time)})\n` +
-      `→ ${tfLabel(h.fib_tf)} ${h.fib_dir === "bull" ? "🟢" : "🔴"} fib ${h.ratio} touched ${when(h.touched_at)}\n` +
+      `→ ${tfLabel(h.fib_tf)} ${h.fib_dir === "bull" ? "🟢" : "🔴"} ${h.fib_source === "auto" ? "auto " : ""}fib ${h.ratio} touched ${when(h.touched_at)}\n` +
       `→ ${tfLabel(s.tf)} <b>${SIGNAL_BY_CODE[s.code].name}</b> ${when(s.signal_time)}\nTrend: ${await trendLine(h.symbol)}`,
       recent(s.first_seen_at));
   }
@@ -211,7 +256,7 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   }
 
   const summary: TickSummary = {
-    symbols: symbols.length, trendsUpdated, fibHits, structureAfterFib, alertsSent,
+    symbols: symbols.length, trendsUpdated, fibsRedrawn, fibHits, structureAfterFib, alertsSent,
     errors: [...new Set(errors)].slice(0, 20), ms: Date.now() - started,
   };
   await sql`INSERT INTO ticks (summary) VALUES (${sql.json({ ...summary })})`;
