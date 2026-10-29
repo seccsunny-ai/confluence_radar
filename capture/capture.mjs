@@ -116,6 +116,13 @@ const DEBUG = process.argv.includes("--debug") || config.debug === true;
 
 /** Opens Pine Logs for every indicator on the chart through its legend's "More" menu. */
 async function openPineLogs(page, notes) {
+  // A collapsed legend ("⌄ 3") hides the indicators; expand it first.
+  const toggle = page.locator('[data-name="legend-toggler"], [data-qa-id="legend-toggler"], [aria-label*="Show indicator legend" i]').first();
+  if (await toggle.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await toggle.click().catch(() => {});
+    notes.push("expanded the collapsed legend");
+    await page.waitForTimeout(500);
+  }
   const items = page.locator('[data-name="legend-source-item"], [data-qa-id="legend-source-item"]');
   const n = await items.count();
   notes.push(`legend items: ${n}`);
