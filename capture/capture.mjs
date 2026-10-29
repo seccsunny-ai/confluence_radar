@@ -204,11 +204,12 @@ async function capturePine(layout) {
     await page.waitForTimeout((config.waitSeconds ?? 25) * 1000);
     await page.keyboard.press("Escape");
     notes.push(`entries from websocket: ${found.size}`);
-    if (!found.size || DEBUG) {
-      await openPineLogs(page, notes, found);
+    // Always open every indicator's logs: a panel left open in the saved layout shows only one of them.
+    await openPineLogs(page, notes, found);
+    notes.push(`entries after opening Pine Logs: ${found.size}`);
+    if (DEBUG) {
       const body = await page.locator("body").innerText();
-      notes.push(`entries after opening Pine Logs: ${found.size}`);
-      if (DEBUG) notes.push("page text lines mentioning Pine or Confluence:", ...body.split("\n").filter((l) => /pine|confluence/i.test(l)).slice(0, 50));
+      notes.push("page text lines mentioning Pine or Confluence:", ...body.split("\n").filter((l) => /pine|confluence/i.test(l)).slice(0, 50));
     }
     saveShot(layout, await page.screenshot({ type: "png" }));
     return [...found];
