@@ -149,6 +149,8 @@ async function migrate(s: postgres.Sql) {
       done    BOOLEAN NOT NULL DEFAULT false,
       PRIMARY KEY (symbol, tf)
     );
+    -- 1D and 1W fibs first drawn from only 90 days of candles: redo them once the longer history is in.
+    DELETE FROM fib_runs WHERE tf IN ('1D', '1W') AND NOT EXISTS (SELECT 1 FROM candle_sets);
     CREATE TABLE IF NOT EXISTS settings (
       key    TEXT PRIMARY KEY,
       value  JSONB NOT NULL
