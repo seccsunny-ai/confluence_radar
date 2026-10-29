@@ -166,5 +166,8 @@ async function migrate(s: postgres.Sql) {
       started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       summary     JSONB NOT NULL
     );
+    -- Weekly charts often have no break yet at swing length 50: redraw them once with the swing-point legs.
+    DELETE FROM fib_runs WHERE tf = '1W' AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'fibs_no_break_legs');
+    INSERT INTO settings (key, value) VALUES ('fibs_no_break_legs', 'true') ON CONFLICT DO NOTHING;
   `);
 }

@@ -5,6 +5,7 @@
 // from that low to that high, for a bullish retest. A down leg is the mirror: a red fib from its high to its low.
 // A fib stays valid after the leg ends, until a candle closes beyond its anchor (below the green fib's low,
 // above the red fib's high). The leg in progress gets a fib too, marked as forming, whose far end still moves.
+// Before the first break, the last swing high and low mark the legs.
 import { swingStructure, SWING_LENGTH, type Structure } from "./structure";
 import type { Candle } from "./trend";
 
@@ -22,8 +23,17 @@ export interface LegFib {
 
 /** Every leg's fib that price hasn't broken, oldest first. Pass only closed candles. */
 export function legFibs(candles: Candle[], st: Structure = swingStructure(candles, SWING_LENGTH)): LegFib[] {
-  const starts = st.breaks.filter((b) => b.kind === "CHoCH" || b.trendBefore === null);
   const out: LegFib[] = [];
+  const pushLeg = (up: boolean, iL: number, iH: number, forming: boolean) => {
+    const high = candles[iH].h, low = candles[iL].l;
+    if (!(high > low)) return;
+    if (candles.slice(Math.max(iH, iL) + 1).some((c) => (up ? c.c < low : c.c > high))) return; // broken
+    out.push({
+      direction: up ? "bull" : "bear", high, low, highT: candles[iH].t, lowT: candles[iL].t,
+      anchorT: up ? candles[iL].t : candles[iH].t, forming,
+    });
+  };
+  const starts = st.breaks.filter((b) => b.kind === "CHoCH" || b.trendBefore === null);
   const argmin = (a: number, b: number) => { let m = a; for (let i = a; i <= b; i++) if (candles[i].l < candles[m].l) m = i; return m; };
   const argmax = (a: number, b: number) => { let m = a; for (let i = a; i <= b; i++) if (candles[i].h > candles[m].h) m = i; return m; };
 
@@ -41,14 +51,21 @@ export function legFibs(candles: Candle[], st: Structure = swingStructure(candle
       iL = argmin(iH, to);
       iH = argmax(iH, iL);
     }
-    const high = candles[iH].h, low = candles[iL].l;
-    if (!(high > low)) continue;
-    const broken = candles.slice(Math.max(iH, iL) + 1).some((c) => (up ? c.c < low : c.c > high));
-    if (broken) continue;
-    out.push({
-      direction: up ? "bull" : "bear", high, low, highT: candles[iH].t, lowT: candles[iL].t,
-      anchorT: up ? candles[iL].t : candles[iH].t, forming: k === starts.length - 1,
-    });
+    pushLeg(up, iL, iH, k === starts.length - 1);
+  }
+
+  // No break yet (a short history at swing length 50, as on many weekly charts): the move between the last
+  // swing high and low is the leg, and the move since is the leg in progress.
+  if (!starts.length && st.highs.length && st.lows.length) {
+    const h = st.highs[st.highs.length - 1].i, l = st.lows[st.lows.length - 1].i;
+    const end = candles.length - 1;
+    if (l < h) {
+      pushLeg(true, l, h, false);
+      pushLeg(false, argmin(h, end), h, true);
+    } else {
+      pushLeg(false, l, h, false);
+      pushLeg(true, l, argmax(l, end), true);
+    }
   }
   return out;
 }
