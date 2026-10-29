@@ -109,23 +109,35 @@ function entriesInText(text, found) {
   }
 }
 
+// node capture.mjs --debug: writes debug/<layout>.txt with what the script saw, for finding out why nothing was read.
+const DEBUG = process.argv.includes("--debug") || config.debug === true;
+
 /** Opens Pine Logs for every indicator on the chart through its legend's "More" menu. */
-async function openPineLogs(page) {
-  const items = page.locator('[data-name="legend-source-item"]');
+async function openPineLogs(page, notes) {
+  const items = page.locator('[data-name="legend-source-item"], [data-qa-id="legend-source-item"]');
   const n = await items.count();
+  notes.push(`legend items: ${n}`);
   for (let k = 0; k < n; k++) {
+    const item = items.nth(k);
+    const title = (await item.innerText().catch(() => "")).split("\n")[0];
     try {
-      const item = items.nth(k);
       await item.hover();
-      await item.locator('[data-name="legend-more-action"]').click({ timeout: 3000 });
-      const entry = page.getByText(/^Pine Logs/i).first();
+      const more = item.locator('[data-name="legend-more-action"], [data-qa-id="legend-more-action"], [aria-label="More"]').first();
+      await more.click({ timeout: 3000 });
+      await page.waitForTimeout(500);
+      const menu = await page.locator('[role="menu"], [data-name="menu-inner"], [class*="menu"]').allInnerTexts().catch(() => []);
+      notes.push(`legend ${k} "${title}": menu = ${JSON.stringify(menu.join(" | ").slice(0, 600))}`);
+      const entry = page.getByText(/Pine Logs/i).first();
       if (await entry.isVisible({ timeout: 2000 }).catch(() => false)) {
         await entry.click();
-        await page.waitForTimeout(3000);
+        notes.push(`legend ${k}: clicked Pine Logs`);
+        await page.waitForTimeout(4000);
       } else {
+        notes.push(`legend ${k}: no Pine Logs item`);
         await page.keyboard.press("Escape");
       }
-    } catch {
+    } catch (e) {
+      notes.push(`legend ${k} "${title}": ${e.message.split("\n")[0]}`);
       await page.keyboard.press("Escape").catch(() => {});
     }
   }
@@ -134,20 +146,42 @@ async function openPineLogs(page) {
 async function capturePine(layout) {
   const ctx = await openContext(layout);
   const found = new Set();
+  const notes = [];
+  const frames = { total: 0, urls: new Set(), interesting: [] };
+  const onFrame = (ws) => (f) => {
+    frames.total++;
+    entriesInFrame(f.payload, found);
+    if (DEBUG && frames.interesting.length < 200) {
+      const text = typeof f.payload === "string" ? f.payload : f.payload.toString("utf8");
+      if (/pine|log|Confluence/i.test(text)) frames.interesting.push(`${ws.url()}\n${text.slice(0, 3000)}`);
+    }
+  };
+  const watch = (p) => p.on("websocket", (ws) => { frames.urls.add(ws.url()); ws.on("framereceived", onFrame(ws)); });
   try {
     // The logs reach the browser over TradingView's websocket, so listen before the chart loads.
-    ctx.on("page", (p) => p.on("websocket", (ws) => ws.on("framereceived", (f) => entriesInFrame(f.payload, found))));
-    for (const p of ctx.pages()) p.on("websocket", (ws) => ws.on("framereceived", (f) => entriesInFrame(f.payload, found)));
+    ctx.on("page", watch);
+    ctx.pages().forEach(watch);
     const page = await openLayout(ctx, layout);
     await page.waitForTimeout((config.waitSeconds ?? 25) * 1000);
     await page.keyboard.press("Escape");
-    if (!found.size) {
-      await openPineLogs(page);
-      entriesInText(await page.locator("body").innerText(), found);
+    notes.push(`entries from websocket: ${found.size}`);
+    if (!found.size || DEBUG) {
+      await openPineLogs(page, notes);
+      const body = await page.locator("body").innerText();
+      entriesInText(body, found);
+      notes.push(`entries after opening Pine Logs: ${found.size}`);
+      if (DEBUG) notes.push("page text lines mentioning Pine or Confluence:", ...body.split("\n").filter((l) => /pine|confluence/i.test(l)).slice(0, 50));
     }
     saveShot(layout, await page.screenshot({ type: "png" }));
     return [...found];
   } finally {
+    if (DEBUG) {
+      mkdirSync(join(here, "debug"), { recursive: true });
+      writeFileSync(join(here, "debug", `${layout.name}.txt`), [
+        `websockets: ${[...frames.urls].join(", ")}`, `frames received: ${frames.total}`, ...notes,
+        "", "---- frames mentioning pine/log/Confluence ----", ...frames.interesting,
+      ].join("\n"));
+    }
     await ctx.close();
   }
 }
