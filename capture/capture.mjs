@@ -148,16 +148,20 @@ async function openPineLogs(page, notes, found) {
         const before = found.size;
         await entry.click();
         // Opening Pine Logs re-runs the screener, which takes a while before any log appears.
-        const panel = new Set();
+        // The previous indicator's log can still be on screen, so only entries not read before count.
+        const isNew = (e) => !found.has(e);
+        let panel = [];
         const deadline = Date.now() + (config.logsWaitSeconds ?? 120) * 1000;
         while (Date.now() < deadline) {
           await page.waitForTimeout(2000);
-          entriesInText(await page.locator("body").innerText().catch(() => ""), panel);
-          if (found.size > before || panel.size) break;
+          const seen = new Set();
+          entriesInText(await page.locator("body").innerText().catch(() => ""), seen);
+          panel = [...seen].filter(isNew);
+          if (found.size > before || panel.length) break;
         }
         const fromNetwork = found.size > before;
         if (!fromNetwork) panel.forEach((e) => found.add(e));
-        notes.push(`legend ${k}: ${fromNetwork ? found.size - before : panel.size} entries (${fromNetwork ? "network" : "panel"})`);
+        notes.push(`legend ${k}: ${fromNetwork ? found.size - before : panel.length} entries (${fromNetwork ? "network" : "panel"})`);
       } else {
         notes.push(`legend ${k}: no Pine Logs item`);
         await page.keyboard.press("Escape");
