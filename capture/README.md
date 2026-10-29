@@ -14,7 +14,7 @@ This runs with your own TradingView logins on your home connection. Your compute
    npm install
    ```
 3. Copy `config.example.json` to `config.json` and fill in:
-   - `site`: your Confluence Radar address. `password`: your `APP_PASSWORD`, or empty.
+   - `site`: your Confluence Radar address, `https://confluence-radar.vercel.app`. Use that address, not one ending in `-sunny-b0d4.vercel.app`: Vercel Authentication protects those, so uploads get "HTTP 401". `password`: your `APP_PASSWORD`, or empty.
    - `layouts`: one entry per chart layout. `url` is the layout's address (open it in TradingView and copy the address bar, like `https://www.tradingview.com/chart/AbCdEf12/`). `profile` is a name for the TradingView account that owns it: `trading` for the divergence screeners, `diyvol` for the SMC screener.
    - `browser`: `"chrome"` uses your installed Chrome, which Google sign-in accepts. These are separate, script-only browser windows; your normal Chrome profiles are not touched.
 4. Sign in once per account. A Chrome window opens; sign in to TradingView, then close the window:
