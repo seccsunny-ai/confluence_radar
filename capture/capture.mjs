@@ -11,7 +11,7 @@
 // Sign-in: a layout with "sessionid" and "sessionid_sign" (TradingView's login cookies) uses those; otherwise its
 // profile's saved browser login under ./profiles/<profile> is used, so two TradingView accounts work side by side.
 import { chromium } from "playwright";
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,27 +31,10 @@ async function login(profile) {
   log("Login saved.");
 }
 
-// Where Brave usually lives; "browserPath" in the config overrides it.
-const BRAVE_PATHS = [
-  join(process.env.PROGRAMFILES ?? "C:\\Program Files", "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
-  join(process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)", "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
-  join(process.env.LOCALAPPDATA ?? "", "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
-  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-  "/usr/bin/brave-browser",
-];
-
-// "browser": "chrome" uses the installed Google Chrome and "brave" the installed Brave, instead of Playwright's
-// Chromium (Google sign-in accepts them). "browserPath" points at any other Chromium-based browser.
+// "browser": "chrome" uses the installed Google Chrome instead of Playwright's Chromium (Google sign-in accepts it).
 function browserChoice() {
-  const path = config.browserPath || process.env.CHROMIUM_PATH;
-  if (path) return { executablePath: path };
-  if (config.browser === "chrome") return { channel: "chrome" };
-  if (config.browser === "brave") {
-    const found = BRAVE_PATHS.find((p) => existsSync(p));
-    if (!found) throw new Error('Brave not found. Add "browserPath" with the full path to brave.exe to config.json.');
-    return { executablePath: found };
-  }
-  return {};
+  if (process.env.CHROMIUM_PATH) return { executablePath: process.env.CHROMIUM_PATH }; // optional: an already-installed Chromium
+  return config.browser === "chrome" ? { channel: "chrome" } : {};
 }
 
 async function openContext(layout) {
