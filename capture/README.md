@@ -29,6 +29,8 @@ This runs with your own TradingView logins on your home connection. Your compute
    It prints how many signals each upload produced. If it says it found no entries, look at `shots/<name>.png` to see what the browser saw, and try a bigger `waitSeconds`. Opening Pine Logs re-runs each screener; the script waits up to `logsWaitSeconds` (default 60) for its log to appear. If none comes, it reloads the page, waits `refreshWaitSeconds` (default 15) and opens Pine Logs again, up to `logsRetries` (default 2) times. To watch it work, add `"headless": false` to the config.
 6. Run it every hour (see **Run it every hour** below). On Windows, also untick "Start the task only if the computer is on AC power" in Task Scheduler if you use a laptop.
 
+After each run the script reports to the site. If a chart failed or read far fewer signals than usual, or a screener has had no upload for 90 minutes (PC off or asleep), the site sends a 🩺 Telegram message. Turn it off under Telegram → "Capture problems".
+
 Without `"browser": "chrome"` it uses Playwright's own Chromium; install that with `npx playwright install chromium`. Google sign-in may refuse that browser, so sign in with your TradingView email and password, or use Chrome.
 
 > TradingView's terms discourage automated access. This opens your own charts once an hour, the same as you would by hand, but use it at your own discretion.

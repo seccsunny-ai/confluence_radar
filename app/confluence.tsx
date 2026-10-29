@@ -323,7 +323,7 @@ export function Fibs({ refresh }: { refresh: number }) {
 
 interface AlertSettings {
   gold: boolean; goldStructure: boolean; fibTouch: boolean; fibStructure: boolean; trendChange: boolean; trendPotential: boolean;
-  trendTfs: string[]; fibTolerancePct: number;
+  trendTfs: string[]; fibTolerancePct: number; captureHealth: boolean; captureStaleMinutes: number;
 }
 interface TelegramInfo {
   status: { configured: boolean; bot: string | null; chatId: string | null; chatFromEnv: boolean; error: string | null };
@@ -338,6 +338,7 @@ const TOGGLES: Array<[keyof AlertSettings, string]> = [
   ["trendPotential", "⚠️ Potential trend change"],
   ["trendChange", "Trend flipped up or down"],
   ["gold", "Every new Gold signal"],
+  ["captureHealth", "🩺 Capture problems: a chart failed or read far fewer signals than usual, or no upload for a while"],
 ];
 
 export function Alerts({ fmt }: { fmt: Fmt }) {
