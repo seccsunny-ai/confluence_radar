@@ -149,7 +149,7 @@ async function openPineLogs(page, notes, found) {
         await entry.click();
         // Opening Pine Logs re-runs the screener, which takes a while before any log appears.
         const panel = new Set();
-        const deadline = Date.now() + (config.logsWaitSeconds ?? 60) * 1000;
+        const deadline = Date.now() + (config.logsWaitSeconds ?? 120) * 1000;
         while (Date.now() < deadline) {
           await page.waitForTimeout(2000);
           entriesInText(await page.locator("body").innerText().catch(() => ""), panel);
@@ -263,7 +263,12 @@ async function main() {
   for (const layout of config.layouts) {
     try {
       if (layout.mode === "pine") {
-        const entries = await capturePine(layout);
+        let entries = await capturePine(layout);
+        if (!entries.length) {
+          // The Pine Logs panel sometimes keeps loading forever; a fresh browser usually gets it.
+          log(`${layout.name}: no entries, trying once more`);
+          entries = await capturePine(layout);
+        }
         if (!entries.length) {
           throw new Error("No Confluence Radar entries in Pine Logs. Check that the export version of the screener is on this layout " +
             `(see pine/README.md), and look at shots/${layout.name}.png. Raising waitSeconds can help.`);
