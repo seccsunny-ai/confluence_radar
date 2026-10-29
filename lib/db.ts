@@ -116,6 +116,21 @@ async function migrate(s: postgres.Sql) {
       updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (symbol, tf)
     );
+    -- Fibs drawn from the swing structure (autofib.ts): one per leg, keyed by where the leg started.
+    ALTER TABLE fibs ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
+    ALTER TABLE fibs ADD COLUMN IF NOT EXISTS anchor_t TIMESTAMPTZ;
+    ALTER TABLE fibs ADD COLUMN IF NOT EXISTS high_t TIMESTAMPTZ;
+    ALTER TABLE fibs ADD COLUMN IF NOT EXISTS low_t TIMESTAMPTZ;
+    ALTER TABLE fibs ADD COLUMN IF NOT EXISTS forming BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE fibs ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ;
+    CREATE UNIQUE INDEX IF NOT EXISTS fibs_auto_leg ON fibs (symbol, tf, direction, anchor_t) WHERE source = 'auto';
+    -- The last closed candle the auto fibs were worked out from, so each timeframe is redone only after a new close.
+    CREATE TABLE IF NOT EXISTS fib_runs (
+      symbol       TEXT NOT NULL,
+      tf           TEXT NOT NULL,
+      last_closed  TIMESTAMPTZ NOT NULL,
+      PRIMARY KEY (symbol, tf)
+    );
     CREATE TABLE IF NOT EXISTS settings (
       key    TEXT PRIMARY KEY,
       value  JSONB NOT NULL

@@ -8,9 +8,12 @@ const BASE = process.env.BITGET_API_URL || "https://api.bitget.com";
 const GRANULARITY: Record<string, { g: string; ms: number }> = {
   "5m": { g: "5m", ms: 5 * 60_000 },
   "15m": { g: "15m", ms: 15 * 60_000 },
+  "30m": { g: "30m", ms: 30 * 60_000 },
   "1h": { g: "1H", ms: 3600_000 },
+  "2h": { g: "2H", ms: 2 * 3600_000 },
   "4h": { g: "4H", ms: 4 * 3600_000 },
   "1D": { g: "1Dutc", ms: 86400_000 },
+  "1W": { g: "1Wutc", ms: 7 * 86400_000 },
 };
 
 export const TF_MS: Record<string, number> = Object.fromEntries(Object.entries(GRANULARITY).map(([k, v]) => [k, v.ms]));
