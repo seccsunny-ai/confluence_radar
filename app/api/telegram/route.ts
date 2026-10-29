@@ -11,7 +11,7 @@ export async function GET() {
     const [status, settings, recent] = await Promise.all([
       telegramStatus(sql),
       alertSettings(sql),
-      sql`SELECT key, text, sent_at FROM alerts ORDER BY sent_at DESC LIMIT 30`,
+      sql`SELECT key, text, sent_at FROM alerts WHERE text <> '' ORDER BY sent_at DESC LIMIT 30`,
     ]);
     return NextResponse.json({ status, settings, recent });
   } catch (e) {

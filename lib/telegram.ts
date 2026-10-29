@@ -3,7 +3,10 @@
 import type postgres from "postgres";
 
 export interface AlertSettings {
-  gold: boolean; // every new Gold signal
+  goldNew: boolean; // digest: Gold signals new in the latest upload
+  fibHit: boolean; // digest: price reaching any fib level
+  structureNew: boolean; // digest: BOS/CHoCH signals new in the latest upload
+  gold: boolean; // every new Gold signal (old one-message-per-signal alert)
   goldStructure: boolean; // Gold followed by same-direction BOS/CHoCH
   fibTouch: boolean; // Gold, then price at a matching fib
   fibStructure: boolean; // Gold, fib touch, then BOS/CHoCH
@@ -16,12 +19,15 @@ export interface AlertSettings {
 }
 
 export const DEFAULT_SETTINGS: AlertSettings = {
+  goldNew: true,
+  fibHit: true,
+  structureNew: true,
   gold: false,
-  goldStructure: true,
-  fibTouch: true,
-  fibStructure: true,
-  trendChange: true,
-  trendPotential: true,
+  goldStructure: false,
+  fibTouch: false,
+  fibStructure: false,
+  trendChange: false,
+  trendPotential: false,
   trendTfs: ["1h", "4h", "1D"],
   fibTolerancePct: 0.15,
   captureHealth: true,

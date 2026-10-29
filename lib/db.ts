@@ -166,6 +166,28 @@ async function migrate(s: postgres.Sql) {
       started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       summary     JSONB NOT NULL
     );
+    -- Every fib level price reached, once per level (a forming fib's moved level counts as a new one).
+    CREATE TABLE IF NOT EXISTS level_hits (
+      id           SERIAL PRIMARY KEY,
+      fib_id       INTEGER NOT NULL REFERENCES fibs(id) ON DELETE CASCADE,
+      symbol       TEXT NOT NULL,
+      tf           TEXT NOT NULL,
+      direction    TEXT NOT NULL,
+      ratio        DOUBLE PRECISION NOT NULL,
+      level        DOUBLE PRECISION NOT NULL,
+      hit_at       TIMESTAMPTZ NOT NULL,
+      detected_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      confluence   BOOLEAN NOT NULL DEFAULT false,
+      sent         BOOLEAN NOT NULL DEFAULT false,
+      UNIQUE (fib_id, ratio, level)
+    );
+    CREATE INDEX IF NOT EXISTS level_hits_symbol ON level_hits (symbol, hit_at);
+    -- Telegram now gets the Gold/BOS/CHoCH/fib digest and capture warnings: switch the older alerts off once, even
+    -- where they were saved on.
+    UPDATE settings SET value = value || '{"gold": false, "goldStructure": false, "fibTouch": false, "fibStructure": false,
+      "trendChange": false, "trendPotential": false}'::jsonb
+    WHERE key = 'alerts' AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'alerts_digest');
+    INSERT INTO settings (key, value) VALUES ('alerts_digest', 'true') ON CONFLICT DO NOTHING;
     -- Weekly charts often have no break yet at swing length 50: redraw them once with the swing-point legs.
     DELETE FROM fib_runs WHERE tf = '1W' AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'fibs_no_break_legs');
     INSERT INTO settings (key, value) VALUES ('fibs_no_break_legs', 'true') ON CONFLICT DO NOTHING;

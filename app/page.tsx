@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GOLD_WINDOW_DAYS, SIGNAL_BY_CODE, SIGNALS } from "@/lib/signals";
 import { ago, Chips, getJson, Sig } from "./ui";
 import { Alerts, Fibs, FibSignals, Trends } from "./confluence";
+import { FibAlarm, FibHits, useAlarm } from "./fib-alarm";
 
-type Tab = "matches" | "fib" | "trends" | "fibs" | "signals" | "symbols" | "uploads" | "alerts";
+type Tab = "matches" | "fib" | "hits" | "trends" | "fibs" | "signals" | "symbols" | "uploads" | "alerts";
 
 interface Signal {
   id: number;
@@ -572,6 +573,7 @@ export default function Page() {
   const [refresh, setRefresh] = useState(0);
   const fmt = useFmt(tz);
   const bump = useCallback(() => setRefresh((n) => n + 1), []);
+  const [alarm, setAlarm] = useAlarm();
 
   useEffect(() => {
     setTab(load<Tab>("tab", "matches"));
@@ -580,6 +582,7 @@ export default function Page() {
 
   const tabs: Array<[Tab, string]> = [
     ["matches", "Gold → BOS/CHoCH"],
+    ["hits", "Fib hits 🔔"],
     ["fib", "Gold → Fib"],
     ["trends", "Trends"],
     ["fibs", "Fibs"],
@@ -594,6 +597,7 @@ export default function Page() {
       <header className="top">
         <h1>Confluence Radar</h1>
         <span className="spacer" />
+        <FibAlarm alarm={alarm} setAlarm={setAlarm} onHits={bump} />
         <label className="small muted">Show times in&nbsp;
           <select value={tz} onChange={(e) => { setTz(e.target.value); save("tz", e.target.value); }}>
             {DISPLAY_TZS.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
@@ -607,6 +611,7 @@ export default function Page() {
         ))}
       </nav>
       {tab === "matches" && <Matches fmt={fmt} refresh={refresh} />}
+      {tab === "hits" && <FibHits fmt={fmt} refresh={refresh} alarm={alarm} setAlarm={setAlarm} />}
       {tab === "fib" && <FibSignals fmt={fmt} refresh={refresh} />}
       {tab === "trends" && <Trends fmt={fmt} refresh={refresh} />}
       {tab === "fibs" && <Fibs fmt={fmt} refresh={refresh} />}

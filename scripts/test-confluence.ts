@@ -137,7 +137,8 @@ async function e2e() {
   const priceDrop = path([100, 100, 85], 20, M15, now); // 41 bars: flat, then falling through 90
   let trendPoints = down;
   let legPoints: number[] | null = null; // swing legs long enough for swing length 50, for the auto fibs
-  let legsEarly = 0; // legs the data stops short of now, so adding a leg later keeps the earlier candles' times
+  let legsEarly = 0;
+  let recent15: Candle[] | null = null; // the latest 15m candles the fib-hit check sees // legs the data stops short of now, so adding a leg later keeps the earlier candles' times
   const sent: string[] = [];
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -151,14 +152,19 @@ async function e2e() {
       const g = url.searchParams.get("granularity")!;
       const step = { "15m": M15, "1H": H, "2H": 2 * H, "4H": 4 * H, "1Dutc": 24 * H, "1Wutc": 168 * H }[g]!;
       const candles = g === "15m" && url.searchParams.has("startTime") ? priceDrop
+        : recent15 && g === "15m" && url.searchParams.get("limit") === "12" ? recent15
         : legPoints && url.searchParams.get("limit") === "1000" ? path(legPoints, 60, step, now - legsEarly * 60 * step) : path(trendPoints, 8, step, now);
       return Response.json({ code: "00000", data: candles.map((c) => [String(c.t), String(c.o), String(c.h), String(c.l), String(c.c), "1", "1"]) });
     }
     return realFetch(input, init);
   }) as typeof fetch;
 
-  await sql().unsafe("DROP TABLE IF EXISTS candles, candle_sets, fib_runs, fib_hits, fibs, trends, settings, alerts, ticks, sightings, signals, uploads, corrections");
+  await sql().unsafe("DROP TABLE IF EXISTS level_hits, candles, candle_sets, fib_runs, fib_hits, fibs, trends, settings, alerts, ticks, sightings, signals, uploads, corrections");
   const s = await db();
+  // The older one-message alerts (now off by default) are checked first; the digest has its own section below.
+  const { setSetting, DEFAULT_SETTINGS } = await import("../lib/telegram");
+  await setSetting(s, "alerts", { ...DEFAULT_SETTINGS, goldNew: false, fibHit: false, structureNew: false, goldStructure: true, fibTouch: true,
+    fibStructure: true, trendChange: true, trendPotential: true, captureHealth: true });
   const goldTime = new Date(priceDrop[15].t);
   const bosTime = new Date(priceDrop[36].t);
   const insert = (code: string, family: string, source: string, time: Date) => s`
@@ -224,6 +230,50 @@ async function e2e() {
   assert.equal(auto.length, 8);
   assert.ok(auto.every((f) => (f.direction === "bull") === !f.active && (f.direction === "bull") === !!f.ended_at));
 
+  // ── The Telegram digest: new Gold signals and every fib level hit, one block per symbol ──
+  const { setSetting: set2, DEFAULT_SETTINGS: defaults } = await import("../lib/telegram");
+  await set2(s, "alerts", { ...defaults, captureHealth: false }); // the digest only
+  await s`DELETE FROM fibs`;
+  await s`DELETE FROM alerts`;
+  await s`UPDATE settings SET value = ${s.json(Date.now() - 3 * 3600_000)} WHERE key = 'level_hits_checked'`; // as if the last run was long ago
+  await s`INSERT INTO fibs (symbol, tf, direction, high, low, created_at) VALUES ('TESTUSDT.P', '4h', 'bull', 100, 80, now() - interval '1 day')`;
+  await s`INSERT INTO fibs (symbol, tf, direction, high, low, created_at) VALUES ('TESTUSDT.P', '1h', 'bear', 120, 100, now() - interval '1 day')`;
+  await s`
+    INSERT INTO signals (symbol, source, tf, code, family, direction, signal_time, first_seen_at, last_seen_at)
+    VALUES ('TESTUSDT.P', 'divergence', '1h', 'GOLD_BUY', 'gold', 'bull', now() - interval '1 hour', now(), now()),
+      ('TESTUSDT.P', 'divergence', '4h', 'GOLD_SELL', 'gold', 'bear', now() - interval '20 days', now() - interval '20 days', now())`;
+  recent15 = path([95, 89.5, 95], 4, M15, now); // dips to the green fib's 0.5 (90), nowhere near the red fib's levels
+  sent.length = 0;
+  sum = await tick(s);
+  assert.equal(sum.levelHits, 1);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0], [
+    "<b>TEST</b>",
+    "🔥 Gold Buy - 15m 🆕, 1H 🆕",
+    "❄️ Gold Sell - 4H",
+    "📈 Bullish Internal BOS - 15m 🆕",
+    "🟡 Fib - 4H 0.5 fib hit · 90 🆕 (Gold Buy confluence)",
+  ].join("\n"));
+  // Nothing new: nothing sent. The same level again doesn't count twice.
+  sent.length = 0;
+  sum = await tick(s);
+  assert.equal(sum.levelHits, 0);
+  assert.equal(sent.length, 0);
+  // A new hit (the red fib's 0.5 at 110, from below) repeats the Gold lines and the earlier hit. The 4H Gold Sell is
+  // past its 14-day window, so this is no confluence, but it still shows as the latest 4H Gold.
+  recent15 = path([105, 110.05], 4, M15, now + M15);
+  sum = await tick(s);
+  assert.equal(sum.levelHits, 1);
+  assert.equal(sent[0], [
+    "<b>TEST</b>",
+    "🔥 Gold Buy - 15m, 1H",
+    "❄️ Gold Sell - 4H",
+    "📈 Bullish Internal BOS - 15m",
+    "🔴 Fib - 1H 0.5 fib hit · 110 🆕",
+    "🟡 Fib - 4H 0.5 fib hit · 90 (Gold Buy confluence)",
+  ].join("\n"));
+  recent15 = null;
+
   // Older daily candles are paged in a few at a time (Bitget serves 90 days per call) and kept
   const { storedCandles } = await import("../lib/candle-store");
   const D = 24 * H, today = Math.floor(now / D) * D;
@@ -249,6 +299,7 @@ async function e2e() {
 
   // ── capture health ──
   const { captureReport, checkStale } = await import("../lib/health");
+  await set2(s, "alerts", defaults); // capture warnings are on by default
   sent.length = 0;
   for (const n of [239, 240, 239]) assert.deepEqual(await captureReport(s, { charts: [{ name: "divergence", ok: true, signals: n }] }), []);
   assert.equal(sent.length, 0);
