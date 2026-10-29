@@ -79,5 +79,57 @@ async function migrate(s: postgres.Sql) {
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (symbol, tf, from_code, signal_time)
     );
+    -- Fib retracements the user drew in TradingView. bull = green (bullish retest), bear = red.
+    CREATE TABLE IF NOT EXISTS fibs (
+      id          SERIAL PRIMARY KEY,
+      symbol      TEXT NOT NULL,
+      tf          TEXT NOT NULL,
+      direction   TEXT NOT NULL,
+      high        DOUBLE PRECISION NOT NULL,
+      low         DOUBLE PRECISION NOT NULL,
+      note        TEXT,
+      active      BOOLEAN NOT NULL DEFAULT true,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    -- First time price reached a matching fib after a Gold signal, and the BOS/CHoCH that followed.
+    CREATE TABLE IF NOT EXISTS fib_hits (
+      gold_id         INTEGER NOT NULL REFERENCES signals(id) ON DELETE CASCADE,
+      fib_id          INTEGER NOT NULL REFERENCES fibs(id) ON DELETE CASCADE,
+      ratio           DOUBLE PRECISION NOT NULL,
+      level           DOUBLE PRECISION NOT NULL,
+      touched_at      TIMESTAMPTZ NOT NULL,
+      at_signal       BOOLEAN NOT NULL,
+      structure_id    INTEGER REFERENCES signals(id) ON DELETE SET NULL,
+      detected_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (gold_id, fib_id)
+    );
+    CREATE TABLE IF NOT EXISTS trends (
+      symbol      TEXT NOT NULL,
+      tf          TEXT NOT NULL,
+      trend       TEXT NOT NULL,
+      potential   TEXT,
+      since       TIMESTAMPTZ,
+      last_high   JSONB,
+      last_low    JSONB,
+      price       DOUBLE PRECISION,
+      note        TEXT,
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (symbol, tf)
+    );
+    CREATE TABLE IF NOT EXISTS settings (
+      key    TEXT PRIMARY KEY,
+      value  JSONB NOT NULL
+    );
+    -- One row per Telegram alert sent, so nothing is sent twice.
+    CREATE TABLE IF NOT EXISTS alerts (
+      key      TEXT PRIMARY KEY,
+      text     TEXT NOT NULL,
+      sent_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS ticks (
+      id          SERIAL PRIMARY KEY,
+      started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      summary     JSONB NOT NULL
+    );
   `);
 }

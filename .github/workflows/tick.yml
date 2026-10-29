@@ -1,0 +1,28 @@
+name: Price check and alerts
+
+# Every 15 minutes: refresh trends, look for Gold signals reaching a fib, and send Telegram alerts.
+# Needs the CRON_SECRET repository secret (the same value as CRON_SECRET in Vercel) when the site has APP_PASSWORD set.
+# Set the RADAR_URL repository variable if the site moves.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run the check
+        env:
+          RADAR_URL: ${{ vars.RADAR_URL || 'https://confluence-radar-sunny-b0d4.vercel.app' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          auth=()
+          if [ -n "$CRON_SECRET" ]; then auth=(-H "Authorization: Bearer $CRON_SECRET"); fi
+          curl -sS --fail-with-body --max-time 180 -X POST "${auth[@]}" "$RADAR_URL/api/tick"
+          echo

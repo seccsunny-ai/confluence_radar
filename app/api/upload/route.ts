@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { extractScreenshot } from "@/lib/extract";
 import { flatten, store } from "@/lib/ingest";
 import { parseOffset, type Source } from "@/lib/signals";
+import { tickAfterUpload } from "@/lib/after-upload";
 import { fail } from "@/lib/http";
 
 export const runtime = "nodejs";
@@ -29,6 +30,7 @@ export async function POST(req: Request) {
     const flat = Number.isFinite(sentTime) ? flatten(data, offsets, new Date(sentTime), true) : flatten(data, offsets, new Date());
     const sql = await db();
     const res = await store(sql, flat, data, file.name || null, offsets[flat.source]);
+    tickAfterUpload(req);
     return NextResponse.json({
       uploadId: res.uploadId,
       source: flat.source,

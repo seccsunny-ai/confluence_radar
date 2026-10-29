@@ -11,7 +11,7 @@ async function main() {
     console.log("DATABASE_URL not set, skipping db tests");
     return;
   }
-  await sql().unsafe("DROP TABLE IF EXISTS sightings, signals, uploads, corrections");
+  await sql().unsafe("DROP TABLE IF EXISTS fib_hits, fibs, trends, settings, alerts, ticks, sightings, signals, uploads, corrections");
   const s = await db();
   const offsets = { divergence: 330, structure: 0 };
   const ingest = async (file: string) => {
@@ -41,14 +41,16 @@ async function main() {
   assert.deepEqual(conf("FETUSDT.P 15m GOLD_SELL"), ["4h INT_CHOCH_BEAR", "1h SW_BOS_BEAR"]); // 15m BOS came after the 2-day window
   assert.deepEqual(conf("FETUSDT.P 1D GOLD_SELL"), ["4h INT_CHOCH_BEAR", "1h SW_BOS_BEAR", "15m INT_BOS_BEAR"]);
   assert.deepEqual(conf("PEPEUSDT.P 1h GOLD_SELL"), ["1h INT_CHOCH_BEAR", "4h INT_CHOCH_BEAR"]);
-  assert.equal(byKey["LDOUSDT.P 15m GOLD_BUY"].status, "watching");
-  assert.equal(byKey["JUPUSDT.P 1h GOLD_BUY"].status, "watching");
+  // "watching" while the window is still open on the day the tests run, "expired" after
+  const open = (r: { window_end: Date }) => (new Date(r.window_end).getTime() > Date.now() ? "watching" : "expired");
+  assert.equal(byKey["LDOUSDT.P 15m GOLD_BUY"].status, open(byKey["LDOUSDT.P 15m GOLD_BUY"]));
+  assert.equal(byKey["JUPUSDT.P 1h GOLD_BUY"].status, open(byKey["JUPUSDT.P 1h GOLD_BUY"]));
   assert.equal(byKey["BTCUSDT.P 4h GOLD_SELL"].status, "expired");
   assert.equal(byKey["FETUSDT.P 4h GOLD_SELL"].status, "expired");
 
   const same = Object.fromEntries((await goldMatches(s, { sameTfOnly: true })).map((r) => [key(r), r]));
   assert.equal(same["FETUSDT.P 15m GOLD_SELL"].status, "expired");
-  assert.equal(same["FETUSDT.P 1D GOLD_SELL"].status, "watching");
+  assert.equal(same["FETUSDT.P 1D GOLD_SELL"].status, open(same["FETUSDT.P 1D GOLD_SELL"]));
   assert.equal(same["PEPEUSDT.P 1h GOLD_SELL"].confirmations.length, 1);
 
   const confirmedBuys = await goldMatches(s, { direction: "bull", status: "confirmed" });

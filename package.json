@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "tsx scripts/test-parse.ts && tsx scripts/test-db.ts"
+    "test": "tsx scripts/test-parse.ts && tsx scripts/test-db.ts && tsx scripts/test-confluence.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

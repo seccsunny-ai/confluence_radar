@@ -1,20 +1,21 @@
 {
-  "site": "https://confluence-radar.vercel.app",
+  "site": "https://confluence-radar-sunny-b0d4.vercel.app",
   "password": "",
+  "browser": "chrome",
   "layouts": [
     {
       "name": "divergence",
-      "profile": "seccsunny",
+      "profile": "trading",
       "url": "https://www.tradingview.com/chart/XXXXXXXX/",
-      "tz": "+05:30"
+      "mode": "pine"
     },
     {
-      "name": "bos-choch",
-      "profile": "mylgv30photos1",
+      "name": "smc",
+      "profile": "diyvol",
       "url": "https://www.tradingview.com/chart/YYYYYYYY/",
-      "tz": "+00:00"
+      "mode": "pine"
     }
   ],
-  "viewport": { "width": 1100, "height": 1700 },
-  "waitSeconds": 25
+  "viewport": { "width": 1400, "height": 1000 },
+  "waitSeconds": 30
 }

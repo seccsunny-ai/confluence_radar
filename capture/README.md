@@ -1,10 +1,55 @@
 # Automatic hourly capture
 
-Takes a screenshot of each TradingView chart layout and uploads it to Confluence Radar. Works with free TradingView accounts. It can run in the cloud on GitHub Actions (below), or on your own computer.
+Opens each TradingView chart layout, reads the signals the screeners write to **Pine Logs**, and uploads them to Confluence Radar as text. A layout with `"mode": "screenshot"`, or no `mode`, uploads a screenshot instead (the older way).
+
+Pine Logs mode needs the export versions of the screeners (the ones that write `# Confluence Radar: …` entries) on the layout. If a layout has two screeners, both are read. Trends, fibs and Telegram alerts run on the site itself and need nothing from here.
+
+## On your computer (recommended)
+
+This runs with your own TradingView logins on your home connection. Your computer has to be on (and not asleep) for the hourly run.
+
+1. Install [Node.js](https://nodejs.org) (LTS) and Google Chrome.
+2. Download this `capture` folder (or the whole repository), open a terminal in it and run:
+   ```
+   npm install
+   ```
+3. Copy `config.example.json` to `config.json` and fill in:
+   - `site`: your Confluence Radar address. `password`: your `APP_PASSWORD`, or empty.
+   - `layouts`: one entry per chart layout. `url` is the layout's address (open it in TradingView and copy the address bar, like `https://www.tradingview.com/chart/AbCdEf12/`). `profile` is a name for the TradingView account that owns it: `trading` for the divergence screeners, `diyvol` for the SMC screener.
+   - `browser`: `"chrome"` uses your installed Chrome, which Google sign-in accepts. These are separate, script-only browser windows; your normal Chrome profiles are not touched.
+4. Sign in once per account. A Chrome window opens; sign in to TradingView, then close the window:
+   ```
+   node capture.mjs login trading
+   node capture.mjs login diyvol
+   ```
+5. Test it:
+   ```
+   node capture.mjs
+   ```
+   It prints how many signals each upload produced. If it says it found no entries, look at `shots/<name>.png` to see what the browser saw, and try a bigger `waitSeconds`. To watch it work, add `"headless": false` to the config.
+6. Run it every hour (see **Run it every hour** below). On Windows, also untick "Start the task only if the computer is on AC power" in Task Scheduler if you use a laptop.
+
+Without `"browser": "chrome"` it uses Playwright's own Chromium; install that with `npx playwright install chromium`. Google sign-in may refuse that browser, so sign in with your TradingView email and password, or use Chrome.
 
 > TradingView's terms discourage automated access. This opens your own charts once an hour, the same as you would by hand, but use it at your own discretion.
 
-## GitHub Actions (runs in the cloud every hour)
+## Run it every hour
+
+**Windows** (Task Scheduler), in a terminal in this folder:
+```
+schtasks /Create /SC HOURLY /TN "Confluence Radar capture" /TR "cmd /c cd /d \"%CD%\" && node capture.mjs >> capture.log 2>&1"
+```
+
+**Mac / Linux** (cron): run `crontab -e` and add (use your real folder path; `which node` shows node's path):
+```
+5 * * * * cd /path/to/capture && /usr/local/bin/node capture.mjs >> capture.log 2>&1
+```
+
+Results and errors go to `capture.log`. If a run says "Not signed in", repeat the login step for that profile.
+
+## GitHub Actions (runs in the cloud every hour, alternative)
+
+This also works with your computer off, but TradingView may sign out logins it sees from cloud servers.
 
 The workflow `.github/workflows/capture.yml` runs at 5 minutes past every hour. It needs one repository secret, `CAPTURE_CONFIG`.
 
@@ -29,42 +74,3 @@ The workflow `.github/workflows/capture.yml` runs at 5 minutes past every hour. 
 4. **Test it.** Open the Actions tab → "Hourly TradingView capture" → Run workflow. The log prints how many signals each upload produced. If a run fails, its screenshots are attached to the run as "shots", so you can see what the browser saw.
 
 The cookies are kept in GitHub's encrypted secrets and never appear in the code or logs. They expire eventually, and TradingView may sign out logins it sees from cloud servers. When a run says "rejected the saved login cookies", copy fresh values into the secret.
-
-## On your own computer
-
-### One-time setup
-
-1. Install [Node.js](https://nodejs.org) (LTS).
-2. Open a terminal in this `capture` folder and run:
-   ```
-   npm install
-   npx playwright install chromium
-   ```
-3. Copy `config.example.json` to `config.json` and fill it in:
-   - `site`: your Confluence Radar address.
-   - `password`: the `APP_PASSWORD` you set in Vercel, or leave empty.
-   - `layouts`: one entry per chart. `url` is the chart layout's address (open the layout in TradingView and copy the browser address, like `https://www.tradingview.com/chart/AbCdEf12/`). `profile` is any name for the TradingView account that owns it. `tz` is the timezone the screener prints its times in (`+05:30` for IST, `+00:00` for UTC).
-4. Sign in once per account. A browser window opens; sign in, then close the window:
-   ```
-   node capture.mjs login seccsunny
-   node capture.mjs login mylgv30photos1
-   ```
-5. Test it:
-   ```
-   node capture.mjs
-   ```
-   It prints how many signals each upload produced. The last screenshot of each layout is saved in `shots/` so you can check the tables were fully drawn. If they were cut off, raise `viewport.height`; if they were still loading, raise `waitSeconds`.
-
-### Run it every hour
-
-**Windows** (Task Scheduler), in a terminal in this folder:
-```
-schtasks /Create /SC HOURLY /TN "Confluence Radar capture" /TR "cmd /c cd /d \"%CD%\" && node capture.mjs >> capture.log 2>&1"
-```
-
-**Mac / Linux** (cron): run `crontab -e` and add (use your real folder path; `which node` shows node's path):
-```
-5 * * * * cd /path/to/capture && /usr/local/bin/node capture.mjs >> capture.log 2>&1
-```
-
-Results and errors go to `capture.log`. If a run says "Not signed in", repeat the login step for that profile.
