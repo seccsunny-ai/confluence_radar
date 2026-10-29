@@ -16,7 +16,7 @@ This runs with your own TradingView logins on your home connection. Your compute
 3. Copy `config.example.json` to `config.json` and fill in:
    - `site`: your Confluence Radar address. `password`: your `APP_PASSWORD`, or empty.
    - `layouts`: one entry per chart layout. `url` is the layout's address (open it in TradingView and copy the address bar, like `https://www.tradingview.com/chart/AbCdEf12/`). `profile` is a name for the TradingView account that owns it: `trading` for the divergence screeners, `diyvol` for the SMC screener.
-   - `browser`: `"chrome"` uses your installed Chrome, which Google sign-in accepts. These are separate, script-only browser windows; your normal Chrome profiles are not touched.
+   - `browser`: `"chrome"` uses your installed Chrome and `"brave"` your installed Brave, both of which Google sign-in accepts. For another Chromium-based browser, set `"browserPath"` to its program file. These are separate, script-only browser windows; your normal Chrome profiles are not touched.
 4. Sign in once per account. A Chrome window opens; sign in to TradingView, then close the window:
    ```
    node capture.mjs login trading
