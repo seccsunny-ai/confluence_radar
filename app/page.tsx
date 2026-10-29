@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GOLD_WINDOW_DAYS, SIGNAL_BY_CODE, SIGNALS } from "@/lib/signals";
+import { ago, Chips, getJson, Sig } from "./ui";
+import { Alerts, Fibs, FibSignals, Trends } from "./confluence";
 
-type Tab = "matches" | "signals" | "symbols" | "uploads";
+type Tab = "matches" | "fib" | "trends" | "fibs" | "signals" | "symbols" | "uploads" | "alerts";
 
 interface Signal {
   id: number;
@@ -74,49 +76,10 @@ function useFmt(tz: string) {
   }, [tz]);
 }
 
-function ago(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const m = Math.round(ms / 60000);
-  if (m < 0) return "in future";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 48) return `${h}h ${m % 60}m ago`;
-  return `${Math.floor(h / 24)}d ${h % 24}h ago`;
-}
-
 function gap(fromIso: string, toIso: string): string {
   const m = Math.round((new Date(toIso).getTime() - new Date(fromIso).getTime()) / 60000);
   const d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mm = m % 60;
   return [d ? `${d}d` : "", h ? `${h}h` : "", !d && mm ? `${mm}m` : ""].filter(Boolean).join(" ") || "0m";
-}
-
-function Sig({ code }: { code: string }) {
-  const d = SIGNAL_BY_CODE[code];
-  if (!d) return <span className="sig">{code}</span>;
-  const cls = d.family === "gold" ? "gold" : d.direction;
-  return <span className={`sig ${cls}`} title={d.name}>{d.label}</span>;
-}
-
-function Chips<T extends string>({ options, value, onChange, render }: {
-  options: T[]; value: T[]; onChange: (v: T[]) => void; render?: (o: T) => React.ReactNode;
-}) {
-  return (
-    <div className="chips">
-      {options.map((o) => (
-        <span key={o} className={`chip ${value.includes(o) ? "on" : ""}`}
-          onClick={() => onChange(value.includes(o) ? value.filter((x) => x !== o) : [...value, o])}>
-          {render ? render(o) : o}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-async function getJson<T>(url: string): Promise<T> {
-  const r = await fetch(url, { cache: "no-store" });
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.error || r.statusText);
-  return j as T;
 }
 
 // ─────────────────────────────── Upload ───────────────────────────────
@@ -617,9 +580,13 @@ export default function Page() {
 
   const tabs: Array<[Tab, string]> = [
     ["matches", "Gold → BOS/CHoCH"],
+    ["fib", "Gold → Fib"],
+    ["trends", "Trends"],
+    ["fibs", "My fibs"],
     ["signals", "Signals"],
     ["symbols", "Symbols"],
     ["uploads", "Uploads"],
+    ["alerts", "Telegram"],
   ];
 
   return (
@@ -640,6 +607,10 @@ export default function Page() {
         ))}
       </nav>
       {tab === "matches" && <Matches fmt={fmt} refresh={refresh} />}
+      {tab === "fib" && <FibSignals fmt={fmt} refresh={refresh} />}
+      {tab === "trends" && <Trends fmt={fmt} refresh={refresh} />}
+      {tab === "fibs" && <Fibs refresh={refresh} />}
+      {tab === "alerts" && <Alerts fmt={fmt} />}
       {tab === "signals" && <Signals fmt={fmt} refresh={refresh} />}
       {tab === "symbols" && <Symbols fmt={fmt} refresh={refresh} />}
       {tab === "uploads" && <Uploads fmt={fmt} refresh={refresh} onChange={bump} />}

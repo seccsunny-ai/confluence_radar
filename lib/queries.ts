@@ -108,3 +108,43 @@ export async function listUploads(sql: postgres.Sql, limit = 100) {
     SELECT id, filename, source, captured_at, created_at, tz_offset_min, signal_count, new_count, warnings
     FROM uploads ORDER BY created_at DESC LIMIT ${limit}`;
 }
+
+export async function listTrends(sql: postgres.Sql) {
+  return sql`SELECT symbol, tf, trend, potential, since, last_high, last_low, price, note, updated_at FROM trends ORDER BY symbol`;
+}
+
+/** Active fibs first, with the latest 15m price so the page can show how far each level is. */
+export async function listFibs(sql: postgres.Sql) {
+  return sql`
+    SELECT f.*, t.price, t.updated_at AS price_at FROM fibs f
+    LEFT JOIN trends t ON t.symbol = f.symbol AND t.tf = '15m'
+    ORDER BY f.active DESC, f.symbol, f.tf, f.created_at DESC`;
+}
+
+/**
+ * Every Gold signal (in the last `sinceDays`) paired with each fib on its symbol that matches its direction:
+ * whether price has reached the fib, and whether a BOS/CHoCH followed.
+ */
+export async function fibSignals(sql: postgres.Sql, sinceDays = 14) {
+  const windowCase = sql.unsafe(
+    "CASE g.tf " + Object.entries(GOLD_WINDOW_DAYS).map(([tf, d]) => `WHEN '${tf}' THEN interval '${d} days'`).join(" ") + " END",
+  );
+  const rows = await sql`
+    SELECT g.id AS gold_id, g.symbol, g.tf, g.code, g.direction, g.signal_time, g.signal_time + ${windowCase} AS window_end,
+      f.id AS fib_id, f.tf AS fib_tf, f.high, f.low, f.note, f.active,
+      h.ratio, h.level, h.touched_at, h.at_signal,
+      s.id AS structure_id, s.tf AS structure_tf, s.code AS structure_code, s.signal_time AS structure_time
+    FROM signals g
+    JOIN fibs f ON f.symbol = g.symbol AND f.direction = g.direction
+    LEFT JOIN fib_hits h ON h.gold_id = g.id AND h.fib_id = f.id
+    LEFT JOIN signals s ON s.id = h.structure_id
+    WHERE g.family = 'gold' AND g.tf IN ${sql(Object.keys(GOLD_WINDOW_DAYS))}
+      AND g.signal_time >= now() - make_interval(days => ${sinceDays})
+      AND (f.active OR h.gold_id IS NOT NULL)
+    ORDER BY g.signal_time DESC, f.tf DESC`;
+  const now = Date.now();
+  return rows.map((r): postgres.Row => ({
+    ...r,
+    status: r.structure_id ? "stronger" : r.touched_at ? "touched" : new Date(r.window_end).getTime() > now ? "waiting" : "expired",
+  }));
+}

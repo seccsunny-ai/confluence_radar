@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { store } from "@/lib/ingest";
 import { parseOffset, type Source } from "@/lib/signals";
 import { parseTextUpload } from "@/lib/textformat";
+import { tickAfterUpload } from "@/lib/after-upload";
 import { fail } from "@/lib/http";
 
 export const runtime = "nodejs";
@@ -38,6 +39,7 @@ export async function POST(req: Request) {
         warnings: flat.warnings,
       });
     }
+    tickAfterUpload(req);
     return NextResponse.json(results);
   } catch (e) {
     return fail(e);
