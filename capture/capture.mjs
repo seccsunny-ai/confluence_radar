@@ -58,6 +58,8 @@ async function openLayout(ctx, layout) {
       : `Not signed in. Run: node capture.mjs login ${layout.profile}`);
   }
   await page.waitForSelector("canvas", { timeout: 60_000 });
+  // Close TradingView's one-off notices ("Got it") so they don't cover the screener tables.
+  page.getByRole("button", { name: /^got it$/i }).first().click({ timeout: 15_000 }).catch(() => {});
   return page;
 }
 
