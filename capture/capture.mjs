@@ -111,7 +111,10 @@ function entriesInText(text, found) {
     const next = text.indexOf(MARK, i + MARK.length);
     let entry = text.slice(i, next < 0 ? undefined : next);
     entry = entry.split(/\[?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/)[0]; // the next log line's timestamp
-    found.add(entry.trim());
+    // The entry ends at the first line that isn't part of it, such as the panel's "More" button.
+    const lines = entry.trim().split("\n").map((l) => l.trim());
+    const end = lines.findIndex((l, k) => k > 0 && l && !/^(CAPTURED|TZ|TIMEZONE)\s*[:=]/i.test(l) && (l.match(/,/g) ?? []).length < 3);
+    found.add((end < 0 ? lines : lines.slice(0, end)).join("\n").trim());
     i = next;
   }
 }
