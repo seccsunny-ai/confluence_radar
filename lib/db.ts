@@ -188,6 +188,10 @@ async function migrate(s: postgres.Sql) {
       "trendChange": false, "trendPotential": false}'::jsonb
     WHERE key = 'alerts' AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'alerts_digest');
     INSERT INTO settings (key, value) VALUES ('alerts_digest', 'true') ON CONFLICT DO NOTHING;
+    -- BOS/CHoCH left the digest at the owner's request: switch it off once.
+    UPDATE settings SET value = value || '{"structureNew": false}'::jsonb
+    WHERE key = 'alerts' AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'digest_no_structure');
+    INSERT INTO settings (key, value) VALUES ('digest_no_structure', 'true') ON CONFLICT DO NOTHING;
     -- Weekly charts often have no break yet at swing length 50: redraw them once with the swing-point legs.
     DELETE FROM fib_runs WHERE tf = '1W' AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'fibs_no_break_legs');
     INSERT INTO settings (key, value) VALUES ('fibs_no_break_legs', 'true') ON CONFLICT DO NOTHING;

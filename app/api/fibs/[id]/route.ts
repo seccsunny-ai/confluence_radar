@@ -19,11 +19,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (!parsed.success) return fail(parsed.error.issues.map((i) => i.message).join(" "), 400);
     const f = parsed.data;
     const [row] = await sql.begin(async (tx) => {
-      // New levels: earlier touches no longer apply.
+      // New levels: earlier touches no longer apply, and price is checked against them from now on.
       await tx`DELETE FROM fib_hits WHERE fib_id = ${id}`;
       return tx`
         UPDATE fibs SET symbol = ${normalizeSymbol(f.symbol)}, tf = ${f.tf}, direction = ${f.direction},
-          high = ${f.high}, low = ${f.low}, note = ${f.note || null}
+          high = ${f.high}, low = ${f.low}, note = ${f.note || null}, created_at = now()
         WHERE id = ${id} RETURNING *`;
     });
     return row ? NextResponse.json(row) : fail("That fib no longer exists.", 404);

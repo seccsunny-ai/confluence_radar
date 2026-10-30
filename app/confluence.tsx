@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fibLevels } from "@/lib/fibs";
+import { FIB_TFS, fibLevels } from "@/lib/fibs";
 import { ago, getJson, Sig } from "./ui";
 
 type Fmt = (s: string) => string;
@@ -252,7 +252,7 @@ export function Fibs({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
   const set = (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [k]: e.target.value });
   const shown = rows?.filter((f) => (!symbol || f.symbol.includes(symbol.toUpperCase())) && (!kind || f.source === kind) && (!tf || f.tf === tf));
   const preview = Number(form.high) > Number(form.low) && Number(form.low) > 0
-    ? fibLevels({ direction: form.direction as "bull" | "bear", high: Number(form.high), low: Number(form.low) }) : null;
+    ? fibLevels({ direction: form.direction as "bull" | "bear", high: Number(form.high), low: Number(form.low), tf: form.tf }) : null;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -286,11 +286,13 @@ export function Fibs({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
           a down leg a red fib from its high to its low (bearish retest after a Gold Sell). A fib stays until a candle on its timeframe closes beyond the
           leg&apos;s start: below a green fib&apos;s low, above a red fib&apos;s high. 1D and 1W levels are on a log scale and include 0.382.
           &quot;Forming&quot; means the leg is still running, so its far end can still move.
-          You can also add a fib you drew yourself: copy the swing high and swing low it&apos;s anchored to.
+          You can also add a fib you drew yourself on 15m, 1H, 4H or 1D: copy the swing high and swing low it&apos;s anchored to (a 1D fib uses log
+          levels, as above). Price reaching its levels is sent to Telegram like the auto fibs, and it&apos;s removed once a candle on its timeframe
+          closes beyond its start after you added it.
         </div>
         <div className="row">
           <input type="text" placeholder="Symbol, e.g. BTCUSDT.P" value={form.symbol} onChange={set("symbol")} required />
-          <select value={form.tf} onChange={set("tf")}><option value="1h">1H</option><option value="4h">4H</option></select>
+          <select value={form.tf} onChange={set("tf")}>{FIB_TFS.map((t) => <option key={t} value={t}>{tfLabel(t)}</option>)}</select>
           <select value={form.direction} onChange={set("direction")}>
             <option value="bull">🟢 Green (bullish retest)</option>
             <option value="bear">🔴 Red (bearish retest)</option>
@@ -309,7 +311,7 @@ export function Fibs({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
           <input type="text" placeholder="Symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)} />
           <select value={tf} onChange={(e) => setTf(e.target.value)}>
             <option value="">All timeframes</option>
-            {["1h", "2h", "4h", "1D", "1W"].map((t) => <option key={t} value={t}>{tfLabel(t)}</option>)}
+            {["15m", "1h", "2h", "4h", "1D", "1W"].map((t) => <option key={t} value={t}>{tfLabel(t)}</option>)}
           </select>
           <select value={kind} onChange={(e) => setKind(e.target.value)}>
             <option value="">Auto and mine</option>

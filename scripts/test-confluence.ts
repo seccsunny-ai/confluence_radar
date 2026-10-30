@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { legFibs } from "../lib/autofib";
 import { weeklyFromDaily } from "../lib/candle-store";
-import { fibLevels, firstTouch } from "../lib/fibs";
+import { FibInput, fibLevels, firstTouch } from "../lib/fibs";
 import { swingStructure } from "../lib/structure";
 import { analyzeTrend, type Candle } from "../lib/trend";
 
@@ -117,6 +117,9 @@ near({ tf: "1D", direction: "bear", high: 295.7, low: 60.03 }, [133.229, 160.803
 near({ tf: "1D", direction: "bull", high: 124.95, low: 60.03 }, [86.607, 79.433, 70.232]);
 near({ tf: "1W", direction: "bull", high: 295.6, low: 7.86 }, [48.22, 31.431, 17.09]);
 assert.equal(fibLevels({ tf: "1D", direction: "bull", high: 124.95, low: 60.03 })[0].ratio, 0.382);
+// Fibs entered by hand: 15m, 1H, 4H and 1D
+for (const tf of ["15m", "60", "4h", "1D"]) assert.ok(FibInput.safeParse({ symbol: "X", tf, direction: "bull", high: 2, low: 1 }).success, tf);
+assert.equal(FibInput.safeParse({ symbol: "X", tf: "2h", direction: "bull", high: 2, low: 1 }).success, false);
 
 console.log("confluence unit checks passed");
 
@@ -235,6 +238,7 @@ async function e2e() {
   await set2(s, "alerts", { ...defaults, captureHealth: false }); // the digest only
   await s`DELETE FROM fibs`;
   await s`DELETE FROM alerts`;
+  trendPoints = [95, 98]; // inside both fibs below: neither is broken
   await s`UPDATE settings SET value = ${s.json(Date.now() - 3 * 3600_000)} WHERE key = 'level_hits_checked'`; // as if the last run was long ago
   await s`INSERT INTO fibs (symbol, tf, direction, high, low, created_at) VALUES ('TESTUSDT.P', '4h', 'bull', 100, 80, now() - interval '1 day')`;
   await s`INSERT INTO fibs (symbol, tf, direction, high, low, created_at) VALUES ('TESTUSDT.P', '1h', 'bear', 120, 100, now() - interval '1 day')`;
@@ -251,7 +255,6 @@ async function e2e() {
     "<b>TEST</b>",
     "🔥 Gold Buy - 15m 🆕, 1H 🆕",
     "❄️ Gold Sell - 4H",
-    "📈 Bullish Internal BOS - 15m 🆕",
     "🟡 Fib - 4H 0.5 fib hit · 90 🆕 (Gold Buy confluence)",
   ].join("\n"));
   // Nothing new: nothing sent. The same level again doesn't count twice.
@@ -268,11 +271,19 @@ async function e2e() {
     "<b>TEST</b>",
     "🔥 Gold Buy - 15m, 1H",
     "❄️ Gold Sell - 4H",
-    "📈 Bullish Internal BOS - 15m",
     "🔴 Fib - 1H 0.5 fib hit · 110 🆕",
     "🟡 Fib - 4H 0.5 fib hit · 90 (Gold Buy confluence)",
   ].join("\n"));
   recent15 = null;
+  // A fib entered by hand goes once a candle on its timeframe closes beyond its start after it was added
+  trendPoints = [95, 70]; // closes below the green fib's 80 low, never above the red fib's 120 high
+  sum = await tick(s);
+  assert.equal(sum.manualFibsRemoved, 1);
+  assert.deepEqual((await s`SELECT tf, direction FROM fibs WHERE source = 'manual'`).map((f) => `${f.tf} ${f.direction}`), ["1h bear"]);
+  // ...but not for a close before it was added
+  await s`INSERT INTO fibs (symbol, tf, direction, high, low) VALUES ('TESTUSDT.P', '15m', 'bull', 100, 80)`;
+  sum = await tick(s);
+  assert.equal(sum.manualFibsRemoved, 0);
 
   // Older daily candles are paged in a few at a time (Bitget serves 90 days per call) and kept
   const { storedCandles } = await import("../lib/candle-store");
