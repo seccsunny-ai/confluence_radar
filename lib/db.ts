@@ -198,5 +198,12 @@ async function migrate(s: postgres.Sql) {
     -- A new leg at every BOS as well as every CHoCH, ended by a close beyond either end: redraw everything once.
     DELETE FROM fib_runs WHERE NOT EXISTS (SELECT 1 FROM settings WHERE key = 'fibs_bos_legs');
     INSERT INTO settings (key, value) VALUES ('fibs_bos_legs', 'true') ON CONFLICT DO NOTHING;
+    -- An early screenshot upload misread ONDOUSDT.P as ONDUSDT.P, which Bitget doesn't list: fold it into ONDOUSDT.P.
+    UPDATE signals s SET symbol = 'ONDOUSDT.P' WHERE s.symbol = 'ONDUSDT.P' AND NOT EXISTS (
+      SELECT 1 FROM signals o WHERE o.symbol = 'ONDOUSDT.P' AND o.tf = s.tf AND o.code = s.code AND o.signal_time = s.signal_time);
+    DELETE FROM signals WHERE symbol = 'ONDUSDT.P';
+    DELETE FROM trends WHERE symbol = 'ONDUSDT.P';
+    DELETE FROM fibs WHERE symbol = 'ONDUSDT.P';
+    DELETE FROM fib_runs WHERE symbol = 'ONDUSDT.P';
   `);
 }
