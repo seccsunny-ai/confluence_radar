@@ -152,10 +152,10 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
         RETURNING id`;
       ids.push(row.id);
     }
-    // Broken since (a leg that started before the candles we have can't be checked, so it stays)
+    // Price has closed beyond them since, or a later leg took over
     await sql`
       UPDATE fibs SET active = false, forming = false, ended_at = now()
-      WHERE source = 'auto' AND symbol = ${symbol} AND tf = ${tf} AND active AND anchor_t >= ${new Date(candles[0].t)}
+      WHERE source = 'auto' AND symbol = ${symbol} AND tf = ${tf} AND active
         ${ids.length ? sql`AND id NOT IN ${sql(ids)}` : sql``}`;
     await sql`
       INSERT INTO fib_runs (symbol, tf, last_closed) VALUES (${symbol}, ${tf}, ${new Date(candles[candles.length - 1].t)})

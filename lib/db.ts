@@ -195,5 +195,8 @@ async function migrate(s: postgres.Sql) {
     -- Weekly charts often have no break yet at swing length 50: redraw them once with the swing-point legs.
     DELETE FROM fib_runs WHERE tf = '1W' AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'fibs_no_break_legs');
     INSERT INTO settings (key, value) VALUES ('fibs_no_break_legs', 'true') ON CONFLICT DO NOTHING;
+    -- A new leg at every BOS as well as every CHoCH, ended by a close beyond either end: redraw everything once.
+    DELETE FROM fib_runs WHERE NOT EXISTS (SELECT 1 FROM settings WHERE key = 'fibs_bos_legs');
+    INSERT INTO settings (key, value) VALUES ('fibs_bos_legs', 'true') ON CONFLICT DO NOTHING;
   `);
 }

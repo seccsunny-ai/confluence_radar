@@ -282,10 +282,11 @@ export function Fibs({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
       <form className="panel" onSubmit={submit}>
         <div className="muted small" style={{ marginBottom: 8 }}>
           Fibs are drawn automatically on 1H, 2H, 4H, 1D and 1W from the swing structure (LuxAlgo SMC, swing length 50) of every symbol with a signal
-          in the last 7 days. Each swing leg between two CHoCHs gets one: an up leg a green fib from its low to its high (bullish retest after a Gold Buy),
-          a down leg a red fib from its high to its low (bearish retest after a Gold Sell). A fib stays until a candle on its timeframe closes beyond the
-          leg&apos;s start: below a green fib&apos;s low, above a red fib&apos;s high. 1D and 1W levels are on a log scale and include 0.382.
-          &quot;Forming&quot; means the leg is still running, so its far end can still move.
+          in the last 7 days. Every swing BOS or CHoCH starts a new leg. After a bullish break, a green fib runs from the lowest low between the broken
+          swing high and the break up to the highest high since (bullish retest after a Gold Buy). After a bearish break, a red fib runs from the
+          highest high between the broken swing low and the break down to the lowest low since (bearish retest after a Gold Sell). A fib goes once a
+          candle on its timeframe closes beyond either end, below its low or above its high, so usually only the latest leg&apos;s fib is left.
+          1D and 1W levels are on a log scale and include 0.382. &quot;Forming&quot; means the leg is still running, so its far end can still move.
           You can also add a fib you drew yourself on 15m, 1H, 4H or 1D: copy the swing high and swing low it&apos;s anchored to (a 1D fib uses log
           levels, as above). Price reaching its levels is sent to Telegram like the auto fibs, and it&apos;s removed once a candle on its timeframe
           closes beyond its start after you added it.

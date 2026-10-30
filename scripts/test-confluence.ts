@@ -81,15 +81,21 @@ assert.deepEqual(st.breaks.map((b) => `${b.kind} ${b.direction} ${b.level.price.
   ["BOS bear 99.99", "BOS bear 89.99", "CHoCH bull 105.01", "BOS bull 125.01"]);
 assert.equal(st.trend, "bull");
 
-// ── auto fibs: one per leg between swing CHoCHs ──
+// ── auto fibs: a new leg at every swing BOS/CHoCH, gone once a close goes beyond either end ──
 const legs = path([100, 80, 95, 70, 90, 120, 100, 130, 105, 115, 95, 108], 8, H);
 const fibsNow = legFibs(legs, swingStructure(legs, 4));
 assert.deepEqual(fibsNow.map((f) => `${f.direction} ${f.low.toFixed(2)}-${f.high.toFixed(2)} ${f.forming ? "forming" : "done"}`),
-  ["bull 69.99-130.01 done", "bear 94.99-130.01 forming"]);
-assert.equal(fibsNow[0].anchorT, legs.find((c) => c.l === fibsNow[0].low)!.t);
-// A close below the up leg's start breaks its green fib
-const broken = path([100, 80, 95, 70, 90, 120, 100, 130, 105, 115, 95, 108, 65], 8, H);
-assert.deepEqual(legFibs(broken, swingStructure(broken, 4)).map((f) => f.direction), ["bear"]);
+  ["bear 94.99-115.01 forming"]); // the up legs' fibs went when price closed below 100 (and 70 → 130 above 120's leg)
+assert.equal(fibsNow[0].anchorT, fibsNow[0].highT); // a red fib starts at its high
+// Your VIRTUAL 4H example: green 0.50 → 0.68, a close above 0.68 → green 0.514 → 0.837, a close above 0.837 →
+// green 0.5746 → 0.886, a close below 0.5746 → red from 0.886 down to the new low
+const virtual = path([0.50, 0.68, 0.514, 0.837, 0.5746, 0.886, 0.55, 0.60], 8, H);
+const steps = (n: number) => legFibs(virtual.slice(0, n), swingStructure(virtual.slice(0, n), 4))
+  .map((f) => `${f.direction} ${f.low.toFixed(3)}-${f.high.toFixed(3)}`);
+assert.deepEqual(steps(21), ["bull 0.490-0.690", "bear 0.504-0.690"]); // before the first break: swing low → high
+assert.deepEqual(steps(33), ["bull 0.504-0.847"]); // closed above 0.69: green from the low after it, 0.514
+assert.deepEqual(steps(48), ["bull 0.565-0.896"]); // closed above 0.837: green from the 0.5746 retest low
+assert.deepEqual(steps(virtual.length), ["bear 0.540-0.896"]);
 
 // Weekly candles from daily ones: Monday to Sunday UTC, and the week still running is left out
 const DAY = 24 * H;
@@ -222,16 +228,17 @@ async function e2e() {
   sum = await tick(s);
   assert.equal(sum.fibsRedrawn, 5);
   let auto = await s`SELECT tf, direction, low, high, forming, active FROM fibs WHERE source = 'auto' ORDER BY tf, direction`;
-  assert.equal(auto.length, 8); // 1H, 2H, 4H, 1D (1W is built from these daily candles: too few weeks here)
-  assert.ok(auto.every((f) => f.active && (f.direction === "bull" ? !f.forming && f.low < 70 : f.forming && f.low < 95)));
-  // Redrawn after a close below the up leg's start: the green fibs end, the red ones stay
-  legPoints = [...legPoints, 65];
+  assert.equal(auto.length, 4); // 1H, 2H, 4H, 1D (1W is built from these daily candles: too few weeks here)
+  assert.ok(auto.every((f) => f.active && f.direction === "bear" && f.forming && f.low < 95)); // only the latest leg is left
+  // Redrawn after a close above the red fibs' high: they end, and the up move that broke them is the new leg
+  legPoints = [...legPoints, 140];
   legsEarly = 0;
   await s`DELETE FROM fib_runs`;
   await tick(s);
   auto = await s`SELECT direction, active, ended_at FROM fibs WHERE source = 'auto' AND tf <> '1W'`;
-  assert.equal(auto.length, 8);
-  assert.ok(auto.every((f) => (f.direction === "bull") === !f.active && (f.direction === "bull") === !!f.ended_at));
+  assert.equal(auto.filter((f) => f.direction === "bear").length, 4);
+  assert.ok(auto.every((f) => (f.direction === "bear") === !f.active && (f.direction === "bear") === !!f.ended_at));
+  assert.equal(auto.filter((f) => f.active).length, 4);
 
   // ── The Telegram digest: new Gold signals and every fib level hit, one block per symbol ──
   const { setSetting: set2, DEFAULT_SETTINGS: defaults } = await import("../lib/telegram");
