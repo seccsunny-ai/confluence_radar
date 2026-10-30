@@ -5,13 +5,15 @@ import { readFileSync } from "node:fs";
 import { db, sql } from "../lib/db";
 import { correctSignal, deleteUpload, flatten, store } from "../lib/ingest";
 import { goldMatches, listSignals, symbolBoard } from "../lib/queries";
+import { checkPriceAlerts, sendPriceAlerts } from "../lib/price-alerts";
+import { DEFAULT_SETTINGS } from "../lib/telegram";
 
 async function main() {
   if (!process.env.DATABASE_URL) {
     console.log("DATABASE_URL not set, skipping db tests");
     return;
   }
-  await sql().unsafe("DROP TABLE IF EXISTS level_hits, candles, candle_sets, fib_runs, fib_hits, fibs, trends, settings, alerts, ticks, sightings, signals, uploads, corrections");
+  await sql().unsafe("DROP TABLE IF EXISTS price_alerts, level_hits, candles, candle_sets, fib_runs, fib_hits, fibs, trends, settings, alerts, ticks, sightings, signals, uploads, corrections");
   const s = await db();
   const offsets = { divergence: 330, structure: 0 };
   const ingest = async (file: string) => {
@@ -89,6 +91,41 @@ async function main() {
   await correctSignal(s, gold.id, null);
   await ingest("scripts/fixtures/divergence.json");
   assert.equal((await listSignals(s, { codes: ["GOLD_BUY", "GOLD_SELL"], symbol: "PEPE", tfs: ["15m"] })).length, 0);
+
+  // Price alerts fire once, on the first 1-minute candle after they were set that reaches the level
+  const min = 60_000;
+  const t0 = Math.floor(Date.now() / min) * min - 30 * min;
+  await s`INSERT INTO price_alerts (symbol, level, direction, created_at) VALUES
+    ('SOLUSDT.P', 110, 'up', ${new Date(t0 + 5 * min)}), ('SOLUSDT.P', 95, 'down', ${new Date(t0 + 5 * min)}),
+    ('SOLUSDT.P', 104, NULL, ${new Date(t0 + 5 * min)}), ('SOLUSDT.P', 130, 'up', ${new Date(t0 + 5 * min)})`;
+  const candle = (i: number, o: number, h: number, l: number, c: number) => ({ t: t0 + i * min, o, h, l, c });
+  const solCandles = [
+    candle(0, 100, 120, 90, 100), // before the alerts were set: doesn't count
+    candle(5, 100, 102, 99, 101),
+    candle(6, 101, 105, 100, 104), // reaches 104 (direction worked out from this candle's open: up)
+    candle(7, 104, 111, 103, 110), // reaches 110
+    candle(8, 110, 112, 108, 109),
+  ];
+  const errs: string[] = [];
+  assert.equal(await checkPriceAlerts(s, errs, async () => solCandles), 2);
+  const pa = Object.fromEntries((await s`SELECT * FROM price_alerts`).map((r) => [r.level, r]));
+  assert.equal(new Date(pa[110].triggered_at).getTime(), t0 + 7 * min);
+  assert.equal(new Date(pa[104].triggered_at).getTime(), t0 + 6 * min);
+  assert.equal(pa[104].direction, "up");
+  assert.equal(pa[95].triggered_at, null);
+  assert.equal(Number(pa[95].checked_to), t0 + 8 * min);
+  // Checked again: nothing fires twice; then price drops to 95
+  assert.equal(await checkPriceAlerts(s, errs, async () => solCandles), 0);
+  assert.equal(await checkPriceAlerts(s, errs, async () => [...solCandles, candle(9, 109, 109, 94, 96)]), 1);
+  // A symbol Bitget can't serve is reported, and its alerts wait
+  await s`INSERT INTO price_alerts (symbol, level, direction) VALUES ('NOPEUSDT.P', 1, 'up')`;
+  assert.equal(await checkPriceAlerts(s, errs, async (sym) => { if (sym === "NOPEUSDT.P") throw new Error("Bitget NOPEUSDT: no"); return []; }), 0);
+  assert.deepEqual(errs, ["Bitget NOPEUSDT: no"]);
+  // Without a Telegram bot nothing is sent or marked sent; switched off, they're marked sent without sending
+  assert.equal(await sendPriceAlerts(s, DEFAULT_SETTINGS, []), 0);
+  assert.equal((await s`SELECT count(*)::int AS n FROM price_alerts WHERE sent`)[0].n, 0);
+  assert.equal(await sendPriceAlerts(s, { ...DEFAULT_SETTINGS, priceAlerts: false }, []), 0);
+  assert.equal((await s`SELECT count(*)::int AS n FROM price_alerts WHERE sent`)[0].n, 3);
 
   console.log("db tests passed");
   await sql().end();

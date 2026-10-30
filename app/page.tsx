@@ -5,8 +5,9 @@ import { GOLD_WINDOW_DAYS, SIGNAL_BY_CODE, SIGNALS } from "@/lib/signals";
 import { ago, Chips, getJson, Sig } from "./ui";
 import { Alerts, Fibs, FibSignals, Trends } from "./confluence";
 import { FibAlarm, FibHits, useAlarm } from "./fib-alarm";
+import { PriceAlerts } from "./price-alerts";
 
-type Tab = "matches" | "fib" | "hits" | "trends" | "fibs" | "signals" | "symbols" | "uploads" | "alerts";
+type Tab = "matches" | "fib" | "hits" | "myalerts" | "trends" | "fibs" | "signals" | "symbols" | "uploads" | "alerts";
 
 interface Signal {
   id: number;
@@ -583,6 +584,7 @@ export default function Page() {
   const tabs: Array<[Tab, string]> = [
     ["matches", "Gold → BOS/CHoCH"],
     ["hits", "Fib hits 🔔"],
+    ["myalerts", "My alerts ⏰"],
     ["fib", "Gold → Fib"],
     ["trends", "Trends"],
     ["fibs", "Fibs"],
@@ -612,6 +614,7 @@ export default function Page() {
       </nav>
       {tab === "matches" && <Matches fmt={fmt} refresh={refresh} />}
       {tab === "hits" && <FibHits fmt={fmt} refresh={refresh} alarm={alarm} setAlarm={setAlarm} />}
+      {tab === "myalerts" && <PriceAlerts fmt={fmt} refresh={refresh} alarm={alarm} setAlarm={setAlarm} />}
       {tab === "fib" && <FibSignals fmt={fmt} refresh={refresh} />}
       {tab === "trends" && <Trends fmt={fmt} refresh={refresh} />}
       {tab === "fibs" && <Fibs fmt={fmt} refresh={refresh} />}

@@ -16,6 +16,7 @@ export interface AlertSettings {
   fibTolerancePct: number; // how close counts as touching a fib level
   captureHealth: boolean; // the hourly capture failed, came back short, or stopped uploading
   captureStaleMinutes: number;
+  priceAlerts: boolean; // the user's own price alerts, one message each
 }
 
 export const DEFAULT_SETTINGS: AlertSettings = {
@@ -32,6 +33,7 @@ export const DEFAULT_SETTINGS: AlertSettings = {
   fibTolerancePct: 0.15,
   captureHealth: true,
   captureStaleMinutes: 90,
+  priceAlerts: true,
 };
 
 export async function getSetting<T>(sql: postgres.Sql, key: string): Promise<T | null> {

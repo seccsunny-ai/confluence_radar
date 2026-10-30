@@ -8,6 +8,7 @@ import { candlesSince, recentCandles, TF_MS } from "./market";
 import { GOLD_WINDOW_DAYS, SIGNAL_BY_CODE } from "./signals";
 import { findLevelHits, sendDigest } from "./digest";
 import { checkStale } from "./health";
+import { checkPriceAlerts, sendPriceAlerts } from "./price-alerts";
 import { alertSettings, esc, sendTelegram, telegramReady, type AlertSettings } from "./telegram";
 import { analyzeTrend, fmtPrice, type Candle } from "./trend";
 
@@ -22,6 +23,7 @@ export interface TickSummary {
   trendsUpdated: number;
   fibsRedrawn: number; // symbol and timeframe pairs whose auto fibs were worked out again
   levelHits: number; // fib levels price reached since the last run
+  priceAlerts: number; // the user's own alerts that price reached
   manualFibsRemoved: number; // fibs entered by hand that price closed beyond
   fibHits: number;
   structureAfterFib: number;
@@ -54,7 +56,7 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   const started = Date.now();
   const settings = await alertSettings(sql);
   const errors: string[] = [];
-  let alertsSent = 0, trendsUpdated = 0, fibsRedrawn = 0, levelHits = 0, manualFibsRemoved = 0, fibHits = 0, structureAfterFib = 0;
+  let alertsSent = 0, priceAlerts = 0, trendsUpdated = 0, fibsRedrawn = 0, levelHits = 0, manualFibsRemoved = 0, fibHits = 0, structureAfterFib = 0;
 
   const alert = async (enabled: boolean, key: string, html: string, isRecent: boolean) => {
     if (!enabled || !isRecent || !telegramReady()) return;
@@ -68,6 +70,14 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
       errors.push(e instanceof Error ? e.message : String(e));
     }
   };
+
+  // ── The user's own price alerts: first, so a slow run doesn't hold them up ──
+  try {
+    priceAlerts = await checkPriceAlerts(sql, errors);
+    alertsSent += await sendPriceAlerts(sql, settings, errors);
+  } catch (e) {
+    errors.push(e instanceof Error ? e.message : String(e));
+  }
 
   // ── Trends ──
   const symbols = (await sql`
@@ -314,7 +324,7 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   }
 
   const summary: TickSummary = {
-    symbols: symbols.length, trendsUpdated, fibsRedrawn, levelHits, manualFibsRemoved, fibHits, structureAfterFib, alertsSent,
+    symbols: symbols.length, trendsUpdated, fibsRedrawn, levelHits, priceAlerts, manualFibsRemoved, fibHits, structureAfterFib, alertsSent,
     errors: [...new Set(errors)].slice(0, 20), ms: Date.now() - started,
   };
   await sql`INSERT INTO ticks (summary) VALUES (${sql.json({ ...summary })})`;
