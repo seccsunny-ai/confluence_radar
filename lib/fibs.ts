@@ -6,7 +6,7 @@ import type { Candle } from "./trend";
 
 export const FIB_RATIOS = [0.5, 0.618, 0.786];
 const HTF_RATIOS = [0.382, 0.5, 0.618, 0.786];
-export const FIB_TFS = ["1h", "4h"]; // timeframes for fibs entered by hand
+export const FIB_TFS = ["15m", "1h", "4h", "1D"]; // timeframes for fibs entered by hand
 // Daily and weekly fibs are drawn on a log chart, so their levels are spaced by percentage rather than price.
 export const LOG_TFS = ["1D", "1W"];
 
@@ -58,7 +58,7 @@ export function firstTouch(candles: Candle[], levels: Array<{ ratio: number; pri
 
 export const FibInput = z.object({
   symbol: z.string().trim().min(1),
-  tf: z.string().transform(normalizeTf).refine((tf) => FIB_TFS.includes(tf), "Fibs are for 1H or 4H."),
+  tf: z.string().transform(normalizeTf).refine((tf) => FIB_TFS.includes(tf), "Fibs are for 15m, 1H, 4H or 1D."),
   direction: z.enum(["bull", "bear"]),
   high: z.coerce.number().positive(),
   low: z.coerce.number().positive(),

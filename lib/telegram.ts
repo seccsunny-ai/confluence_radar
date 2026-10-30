@@ -21,7 +21,7 @@ export interface AlertSettings {
 export const DEFAULT_SETTINGS: AlertSettings = {
   goldNew: true,
   fibHit: true,
-  structureNew: true,
+  structureNew: false,
   gold: false,
   goldStructure: false,
   fibTouch: false,

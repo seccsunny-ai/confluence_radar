@@ -22,6 +22,7 @@ export interface TickSummary {
   trendsUpdated: number;
   fibsRedrawn: number; // symbol and timeframe pairs whose auto fibs were worked out again
   levelHits: number; // fib levels price reached since the last run
+  manualFibsRemoved: number; // fibs entered by hand that price closed beyond
   fibHits: number;
   structureAfterFib: number;
   alertsSent: number;
@@ -53,7 +54,7 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   const started = Date.now();
   const settings = await alertSettings(sql);
   const errors: string[] = [];
-  let alertsSent = 0, trendsUpdated = 0, fibsRedrawn = 0, levelHits = 0, fibHits = 0, structureAfterFib = 0;
+  let alertsSent = 0, trendsUpdated = 0, fibsRedrawn = 0, levelHits = 0, manualFibsRemoved = 0, fibHits = 0, structureAfterFib = 0;
 
   const alert = async (enabled: boolean, key: string, html: string, isRecent: boolean) => {
     if (!enabled || !isRecent || !telegramReady()) return;
@@ -164,6 +165,36 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   // 1W is built from the daily candles, so it goes after 1D has fetched them
   await pool(due.filter(([, tf]) => tf !== "1W"), 4, drawFibs);
   await pool(due.filter(([, tf]) => tf === "1W"), 4, drawFibs);
+
+  // ── Fibs entered by hand go once a candle on their timeframe closes beyond the swing they start from (below a
+  // green fib's low, above a red fib's high), counting candles that closed after the fib was added ──
+  const manual = (await sql`
+    SELECT id, symbol, tf, direction, high, low, created_at FROM fibs WHERE source = 'manual' AND active`) as unknown as Array<
+    Fib & { created_at: Date }>;
+  const manualBy = new Map<string, typeof manual>();
+  for (const f of manual) manualBy.set(`${f.symbol}|${f.tf}`, [...(manualBy.get(`${f.symbol}|${f.tf}`) ?? []), f]);
+  await pool([...manualBy.values()], 4, async (list) => {
+    const { symbol, tf } = list[0];
+    const ms = TF_MS[tf];
+    if (!ms) return;
+    const since = Math.min(...list.map((f) => new Date(f.created_at).getTime()));
+    let candles: Candle[];
+    try {
+      candles = await recentCandles(symbol, tf, Math.min(1000, Math.ceil((Date.now() - since) / ms) + 2));
+    } catch (e) {
+      errors.push(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    for (const f of list) {
+      const added = new Date(f.created_at).getTime();
+      const broken = candles.some((c) => c.t + ms > added && c.t + ms <= Date.now() &&
+        (f.direction === "bull" ? c.c < Number(f.low) : c.c > Number(f.high)));
+      if (broken) {
+        await sql`DELETE FROM fibs WHERE id = ${f.id}`;
+        manualFibsRemoved++;
+      }
+    }
+  });
 
   // ── Every fib level price reached ──
   try {
@@ -283,7 +314,7 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   }
 
   const summary: TickSummary = {
-    symbols: symbols.length, trendsUpdated, fibsRedrawn, levelHits, fibHits, structureAfterFib, alertsSent,
+    symbols: symbols.length, trendsUpdated, fibsRedrawn, levelHits, manualFibsRemoved, fibHits, structureAfterFib, alertsSent,
     errors: [...new Set(errors)].slice(0, 20), ms: Date.now() - started,
   };
   await sql`INSERT INTO ticks (summary) VALUES (${sql.json({ ...summary })})`;
