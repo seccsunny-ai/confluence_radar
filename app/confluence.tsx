@@ -364,7 +364,7 @@ export function Fibs({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
 
 interface AlertSettings {
   goldNew: boolean; fibHit: boolean; structureNew: boolean; gold: boolean; goldStructure: boolean; fibTouch: boolean; fibStructure: boolean; trendChange: boolean; trendPotential: boolean;
-  trendTfs: string[]; fibTolerancePct: number; captureHealth: boolean; captureStaleMinutes: number;
+  trendTfs: string[]; fibTolerancePct: number; captureHealth: boolean; captureStaleMinutes: number; priceAlerts: boolean;
 }
 interface TelegramInfo {
   status: { configured: boolean; bot: string | null; chatId: string | null; chatFromEnv: boolean; error: string | null };
@@ -376,6 +376,7 @@ const TOGGLES: Array<[keyof AlertSettings, string]> = [
   ["goldNew", "🔥❄️ New Gold Buy / Gold Sell on any timeframe (once each, only signals new in the latest upload)"],
   ["structureNew", "📈📉 New BOS / CHoCH on any timeframe (once each, only signals new in the latest upload)"],
   ["fibHit", "🟢🔴🟡 Price hits a fib level (any fib, any timeframe; checked every 15 minutes)"],
+  ["priceAlerts", "⏰ My alerts (set on the My alerts tab): one message each when price reaches the level"],
   ["captureHealth", "🩺 Capture problems: a chart failed or read far fewer signals than usual, or no upload for a while"],
 ];
 // Older one-message-per-event alerts, off since the digest replaced them

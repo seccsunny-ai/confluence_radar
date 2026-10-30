@@ -6,6 +6,7 @@ const BASE = process.env.BITGET_API_URL || "https://api.bitget.com";
 
 // Bitget's daily candles default to UTC+8; the "utc" variants match TradingView's UTC daily bars.
 const GRANULARITY: Record<string, { g: string; ms: number }> = {
+  "1m": { g: "1m", ms: 60_000 },
   "5m": { g: "5m", ms: 5 * 60_000 },
   "15m": { g: "15m", ms: 15 * 60_000 },
   "30m": { g: "30m", ms: 30 * 60_000 },
@@ -79,4 +80,19 @@ export async function candlesSince(symbol: string, tf: string, start: number, ma
     if (end <= from) end = from - 1;
   }
   return [...byTime.values()].sort((a, b) => a.t - b.t);
+}
+
+/** The last traded price of every USDT perpetual, keyed by Bitget symbol ("BTCUSDT"). One call for all of them. */
+export async function lastPrices(): Promise<Map<string, number>> {
+  const url = new URL("/api/v2/mix/market/tickers", BASE);
+  url.searchParams.set("productType", "USDT-FUTURES");
+  const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+  const json = (await res.json().catch(() => null)) as { code?: string; msg?: string; data?: Array<Record<string, string>> } | null;
+  if (!res.ok || json?.code !== "00000") throw new Error(`Bitget tickers: ${json?.msg ?? `HTTP ${res.status}`}`);
+  const out = new Map<string, number>();
+  for (const t of json.data ?? []) {
+    const p = Number(t.lastPr ?? t.last ?? t.close);
+    if (t.symbol && Number.isFinite(p) && p > 0) out.set(t.symbol, p);
+  }
+  return out;
 }

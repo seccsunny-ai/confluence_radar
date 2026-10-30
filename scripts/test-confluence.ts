@@ -168,7 +168,7 @@ async function e2e() {
     return realFetch(input, init);
   }) as typeof fetch;
 
-  await sql().unsafe("DROP TABLE IF EXISTS level_hits, candles, candle_sets, fib_runs, fib_hits, fibs, trends, settings, alerts, ticks, sightings, signals, uploads, corrections");
+  await sql().unsafe("DROP TABLE IF EXISTS price_alerts, level_hits, candles, candle_sets, fib_runs, fib_hits, fibs, trends, settings, alerts, ticks, sightings, signals, uploads, corrections");
   const s = await db();
   // The older one-message alerts (now off by default) are checked first; the digest has its own section below.
   const { setSetting, DEFAULT_SETTINGS } = await import("../lib/telegram");

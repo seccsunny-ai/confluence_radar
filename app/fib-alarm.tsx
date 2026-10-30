@@ -3,15 +3,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getJson } from "./ui";
 
-// The fib-hit alarm: while the site is open it checks for new fib hits every minute and plays a sound (and can show a
-// browser notification). The fib hits themselves are found by the background check every 15 minutes.
+// The alarm: while the site is open it checks every minute for new fib hits and for the user's own price alerts that
+// fired, and plays a sound (and can show a browser notification). Both are found by the background check every 15 minutes.
 
 type Fmt = (s: string) => string;
-type Kind = "bull" | "bear" | "gold";
+export type Kind = "bull" | "bear" | "gold" | "custom";
 
 export interface LevelHit {
   id: number; symbol: string; tf: string; direction: "bull" | "bear"; ratio: number; level: number; hit_at: string; detected_at: string;
   high: number; low: number; source: "manual" | "auto"; forming: boolean; active: boolean; price: number | null; confluence: boolean;
+}
+
+/** One of the user's own price alerts (see /api/price-alerts). */
+export interface PriceAlertRow {
+  id: number; symbol: string; level: number; direction: "up" | "down" | null; fib_id: number | null; fib_label: string | null;
+  note: string | null; created_at: string; triggered_at: string | null; detected_at: string | null; trigger_price: number | null;
+  price?: number | null;
 }
 
 export interface AlarmSettings {
@@ -22,7 +29,7 @@ export interface AlarmSettings {
   only: "all" | "gold"; // ring for every hit, or only Gold + fib confluences
 }
 
-const DEFAULT_ALARM: AlarmSettings = { on: false, volume: 0.7, sounds: { bull: "rise", bear: "fall", gold: "bell" }, notify: false, only: "all" };
+const DEFAULT_ALARM: AlarmSettings = { on: false, volume: 0.7, sounds: { bull: "rise", bear: "fall", gold: "bell", custom: "alarm" }, notify: false, only: "all" };
 
 type Note = [freq: number, start: number, dur: number, wave: OscillatorType];
 export const SOUNDS: Record<string, { label: string; notes: Note[] }> = {
@@ -66,11 +73,15 @@ export function playSound(name: string, volume: number) {
   }
 }
 
+export const KIND_LABEL: Record<Kind, string> = {
+  bull: "Green fib (bullish retest)", bear: "Red fib (bearish retest)", gold: "Gold + fib confluence", custom: "⏰ My alerts",
+};
+
 export const hitKind = (h: Pick<LevelHit, "direction" | "confluence">): Kind => (h.confluence ? "gold" : h.direction);
 const tfLabel = (tf: string) => tf.replace(/h$/, "H");
 const short = (s: string) => s.replace(/USDT\.P$/, "");
 
-function price(p: number | null | undefined): string {
+export function price(p: number | null | undefined): string {
   if (p == null || !Number.isFinite(p)) return "–";
   const abs = Math.abs(p);
   return String(Number(p.toFixed(abs >= 1000 ? 1 : abs >= 1 ? 4 : abs >= 0.01 ? 6 : 8)));
@@ -80,13 +91,22 @@ export const hitText = (h: LevelHit) =>
   `${short(h.symbol)} · ${tfLabel(h.tf)} ${h.direction === "bull" ? "green" : "red"} fib ${h.ratio} hit at ${price(h.level)}` +
   (h.confluence ? ` · Gold ${h.direction === "bull" ? "Buy" : "Sell"} confluence` : "");
 
+export const alertText = (a: PriceAlertRow) =>
+  `⏰ ${short(a.symbol)} ${a.direction === "down" ? "fell to" : a.direction === "up" ? "rose to" : "reached"} ${price(a.level)}` +
+  (a.fib_label ? ` · ${a.fib_label}` : "") + (a.note ? ` · ${a.note}` : "");
+
+interface Toast { key: string; kind: Kind; text: string }
+
 /** Alarm settings, kept in this browser. */
 export function useAlarm(): [AlarmSettings, (patch: Partial<AlarmSettings>) => void] {
   const [s, setS] = useState<AlarmSettings>(DEFAULT_ALARM);
   useEffect(() => {
     try {
       const v = localStorage.getItem("fibAlarm");
-      if (v) setS({ ...DEFAULT_ALARM, ...JSON.parse(v) });
+      if (v) {
+        const saved = JSON.parse(v) as Partial<AlarmSettings>;
+        setS({ ...DEFAULT_ALARM, ...saved, sounds: { ...DEFAULT_ALARM.sounds, ...saved.sounds } });
+      }
     } catch { /* private window: defaults */ }
   }, []);
   const update = useCallback((patch: Partial<AlarmSettings>) => setS((old) => {
@@ -97,34 +117,55 @@ export function useAlarm(): [AlarmSettings, (patch: Partial<AlarmSettings>) => v
   return [s, update];
 }
 
-/** Watches for new fib hits while the page is open; rings and shows them in the corner. */
+/** Watches for new fib hits and fired price alerts while the page is open; rings and shows them in the corner. */
 export function FibAlarm({ alarm, setAlarm, onHits }: { alarm: AlarmSettings; setAlarm: (p: Partial<AlarmSettings>) => void; onHits: () => void }) {
   const lastId = useRef<number | null>(null);
-  const [toasts, setToasts] = useState<LevelHit[]>([]);
+  const lastAlert = useRef<string | null>(null); // detected_at of the newest fired price alert seen
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const [blocked, setBlocked] = useState(false);
 
+  const ring = useCallback((items: Toast[], title: string) => {
+    if (!alarm.on || !items.length) return;
+    setToasts((t) => [...items, ...t.filter((x) => !items.some((i) => i.key === x.key))].slice(0, 8));
+    const kind = (["custom", "gold", "bull", "bear"] as Kind[]).find((k) => items.some((i) => i.kind === k))!;
+    playSound(alarm.sounds[kind], alarm.volume);
+    setBlocked(audio()?.state === "suspended");
+    if (alarm.notify && "Notification" in window && Notification.permission === "granted") {
+      new Notification(title, { body: items.slice(0, 4).map((i) => i.text).join("\n"), tag: kind === "custom" ? "price-alert" : "fib-hit" });
+    }
+  }, [alarm]);
+
+  const pollHits = useCallback(async () => {
+    if (lastId.current == null) {
+      const rows = await getJson<LevelHit[]>("/api/level-hits?days=1");
+      lastId.current = rows[0]?.id ?? 0;
+      return;
+    }
+    const rows = await getJson<LevelHit[]>(`/api/level-hits?after=${lastId.current}`);
+    if (!rows.length) return;
+    lastId.current = Math.max(lastId.current, ...rows.map((r) => r.id));
+    onHits();
+    const hits = rows.filter((r) => r.active && (alarm.only === "all" || r.confluence));
+    ring(hits.map((h) => ({ key: `h${h.id}`, kind: hitKind(h), text: hitText(h) })), hits.length === 1 ? "Fib hit" : `${hits.length} fib hits`);
+  }, [alarm.only, onHits, ring]);
+
+  const pollAlerts = useCallback(async () => {
+    if (lastAlert.current == null) {
+      const { alerts } = await getJson<{ alerts: PriceAlertRow[] }>("/api/price-alerts");
+      lastAlert.current = alerts.reduce((m, a) => (a.detected_at && a.detected_at > m ? a.detected_at : m), new Date(0).toISOString());
+      return;
+    }
+    const rows = await getJson<PriceAlertRow[]>(`/api/price-alerts?after=${encodeURIComponent(lastAlert.current)}`);
+    if (!rows.length) return;
+    lastAlert.current = rows.reduce((m, a) => (a.detected_at! > m ? a.detected_at! : m), lastAlert.current);
+    onHits();
+    ring(rows.map((a) => ({ key: `a${a.id}:${a.triggered_at}`, kind: "custom", text: alertText(a) })), rows.length === 1 ? "Price alert" : `${rows.length} price alerts`);
+  }, [onHits, ring]);
+
   const poll = useCallback(async () => {
-    try {
-      if (lastId.current == null) {
-        const rows = await getJson<LevelHit[]>("/api/level-hits?days=1");
-        lastId.current = rows[0]?.id ?? 0;
-        return;
-      }
-      const rows = await getJson<LevelHit[]>(`/api/level-hits?after=${lastId.current}`);
-      if (!rows.length) return;
-      lastId.current = Math.max(lastId.current, ...rows.map((r) => r.id));
-      onHits();
-      const ring = rows.filter((r) => r.active && (alarm.only === "all" || r.confluence));
-      if (!alarm.on || !ring.length) return;
-      setToasts((t) => [...ring, ...t].slice(0, 8));
-      const kind: Kind = ring.some((r) => r.confluence) ? "gold" : ring[0].direction;
-      playSound(alarm.sounds[kind], alarm.volume);
-      setBlocked(audio()?.state === "suspended");
-      if (alarm.notify && "Notification" in window && Notification.permission === "granted") {
-        new Notification(ring.length === 1 ? "Fib hit" : `${ring.length} fib hits`, { body: ring.slice(0, 4).map(hitText).join("\n"), tag: "fib-hit" });
-      }
-    } catch { /* offline for a moment: try again next minute */ }
-  }, [alarm, onHits]);
+    // Each on its own, so one failing (offline for a moment) doesn't stop the other; both try again next minute
+    await Promise.allSettled([pollAlerts(), pollHits()]);
+  }, [pollAlerts, pollHits]);
 
   useEffect(() => {
     poll();
@@ -141,17 +182,17 @@ export function FibAlarm({ alarm, setAlarm, onHits }: { alarm: AlarmSettings; se
 
   return (
     <>
-      <button className={`btn small alarm-chip ${alarm.on ? "on" : ""}`} title="Sound when price hits a fib level (while this page is open)"
+      <button className={`btn small alarm-chip ${alarm.on ? "on" : ""}`} title="Sound when price hits a fib level or one of your alerts (while this page is open)"
         onClick={() => { const on = !alarm.on; setAlarm({ on }); if (on) playSound(alarm.sounds.gold, alarm.volume); }}>
-        {alarm.on ? "🔔 Fib alarm on" : "🔕 Fib alarm off"}
+        {alarm.on ? "🔔 Alarm on" : "🔕 Alarm off"}
       </button>
       {blocked && alarm.on && <span className="warn">Click anywhere on the page to allow the alarm sound.</span>}
       {toasts.length > 0 && (
         <div className="toasts">
           {toasts.map((h) => (
-            <div key={h.id} className={`toast hit-${hitKind(h)}`}>
-              <span>{hitText(h)}</span>
-              <button className="x" onClick={() => setToasts((t) => t.filter((x) => x.id !== h.id))}>×</button>
+            <div key={h.key} className={`toast hit-${h.kind}`}>
+              <span>{h.text}</span>
+              <button className="x" onClick={() => setToasts((t) => t.filter((x) => x.key !== h.key))}>×</button>
             </div>
           ))}
           {toasts.length > 1 && <button className="btn small" onClick={() => setToasts([])}>Dismiss all</button>}
@@ -177,9 +218,10 @@ export function FibHits({ fmt, refresh, alarm, setAlarm }: { fmt: Fmt; refresh: 
   return (
     <>
       <div className="panel">
-        <h3 style={{ marginTop: 0 }}>Fib alarm</h3>
+        <h3 style={{ marginTop: 0 }}>Alarm</h3>
         <div className="small muted" style={{ marginBottom: 8 }}>
-          Rings on this device while the site is open in a tab (it checks every minute; the site looks for fib hits every 15 minutes).
+          Rings on this device while the site is open in a tab, for fib hits and for your own alerts (it checks every minute; the site
+          looks for fib hits and alerts every 15 minutes).
           Settings are kept in this browser.
         </div>
         <div className="row">
@@ -190,9 +232,9 @@ export function FibHits({ fmt, refresh, alarm, setAlarm }: { fmt: Fmt; refresh: 
           </select>
           <label className="small">Volume <input type="range" min="0" max="1" step="0.05" value={alarm.volume} onChange={(e) => setAlarm({ volume: Number(e.target.value) })} /></label>
         </div>
-        {(["bull", "bear", "gold"] as Kind[]).map((k) => (
+        {(["bull", "bear", "gold", "custom"] as Kind[]).map((k) => (
           <div key={k} className="row" style={{ marginTop: 8 }}>
-            <span className={`hit-pill hit-${k}`}>{k === "bull" ? "Green fib (bullish retest)" : k === "bear" ? "Red fib (bearish retest)" : "Gold + fib confluence"}</span>
+            <span className={`hit-pill hit-${k}`}>{KIND_LABEL[k]}</span>
             <select value={alarm.sounds[k]} onChange={(e) => setAlarm({ sounds: { ...alarm.sounds, [k]: e.target.value } })}>
               {Object.entries(SOUNDS).map(([v, s]) => <option key={v} value={v}>{s.label}</option>)}
             </select>

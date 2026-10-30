@@ -94,6 +94,7 @@ details summary { cursor: pointer; }
 .hit-bull { --tint: rgba(34, 197, 94, 0.18); --edge: rgba(34, 197, 94, 0.5); --ink: var(--bull); }
 .hit-bear { --tint: rgba(239, 68, 68, 0.18); --edge: rgba(239, 68, 68, 0.5); --ink: var(--bear); }
 .hit-gold { --tint: rgba(250, 204, 21, 0.2); --edge: rgba(250, 204, 21, 0.6); --ink: var(--gold); }
+.hit-custom { --tint: rgba(56, 189, 248, 0.18); --edge: rgba(56, 189, 248, 0.55); --ink: var(--accent); }
 .hit-pill, .toast { background: linear-gradient(var(--tint), var(--tint)), var(--panel); color: var(--ink); border: 1px solid var(--edge); }
 .alarm-chip.on { border-color: var(--gold); color: var(--gold); }
 .toasts { position: fixed; top: 12px; right: 12px; z-index: 50; display: grid; gap: 8px; max-width: min(420px, calc(100vw - 24px)); }

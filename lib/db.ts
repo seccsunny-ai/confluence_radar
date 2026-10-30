@@ -182,6 +182,22 @@ async function migrate(s: postgres.Sql) {
       UNIQUE (fib_id, ratio, level)
     );
     CREATE INDEX IF NOT EXISTS level_hits_symbol ON level_hits (symbol, hit_at);
+    -- Alerts the user sets by hand on a price level (a fib level or a price typed in). Each fires once.
+    CREATE TABLE IF NOT EXISTS price_alerts (
+      id             SERIAL PRIMARY KEY,
+      symbol         TEXT NOT NULL,
+      level          DOUBLE PRECISION NOT NULL,
+      direction      TEXT,
+      fib_id         INTEGER REFERENCES fibs(id) ON DELETE SET NULL,
+      fib_label      TEXT,
+      note           TEXT,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+      checked_to     BIGINT,
+      triggered_at   TIMESTAMPTZ,
+      detected_at    TIMESTAMPTZ,
+      trigger_price  DOUBLE PRECISION,
+      sent           BOOLEAN NOT NULL DEFAULT false
+    );
     -- Telegram now gets the Gold/BOS/CHoCH/fib digest and capture warnings: switch the older alerts off once, even
     -- where they were saved on.
     UPDATE settings SET value = value || '{"gold": false, "goldStructure": false, "fibTouch": false, "fibStructure": false,
