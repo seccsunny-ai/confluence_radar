@@ -55,9 +55,13 @@ export function normalizeTf(raw: string): string {
 }
 
 /** "BITGET:BTCUSDT.P" / "btcusdt.p" -> "BTCUSDT.P" */
+// Misreadings seen in uploads, and the symbol they stand for
+const SYMBOL_FIXES: Record<string, string> = { "ONDUSDT.P": "ONDOUSDT.P" };
+
 export function normalizeSymbol(raw: string): string {
-  const s = raw.trim().toUpperCase().replace(/\s+/g, "");
-  return s.includes(":") ? s.split(":").pop()! : s;
+  let s = raw.trim().toUpperCase().replace(/\s+/g, "");
+  if (s.includes(":")) s = s.split(":").pop()!;
+  return SYMBOL_FIXES[s] ?? s;
 }
 
 /** "+05:30" / "UTC+5:30" / "+0530" -> minutes east of UTC. */

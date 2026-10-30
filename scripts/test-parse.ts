@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { flatten } from "../lib/ingest";
-import { normalizeTf, parseCaptureHeader, parseCell, parseCellTime } from "../lib/signals";
+import { normalizeSymbol, normalizeTf, parseCaptureHeader, parseCell, parseCellTime } from "../lib/signals";
 import { parseTextUpload } from "../lib/textformat";
 
 const IST = 330;
@@ -123,5 +123,9 @@ assert.deepEqual(flat.flatMap((g) => g.signals.map((s) => `${s.symbol} ${s.tf} $
   "SUIUSDT.P 1h SW_CHOCH_BEAR 2026-10-25T20:00:00.000Z",
 ]);
 assert.equal(flat[0].warnings.length, 0);
+
+// Symbols: exchange prefix dropped, and a misreading seen in uploads fixed
+assert.equal(normalizeSymbol(" bitget:ondousdt.p "), "ONDOUSDT.P");
+assert.equal(normalizeSymbol("ONDUSDT.P"), "ONDOUSDT.P");
 
 console.log("parse tests passed");
