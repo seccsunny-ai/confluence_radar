@@ -8,6 +8,9 @@ import { GOLD_WINDOW_DAYS, SIGNAL_BY_CODE, SIGNALS } from "./signals";
 import { esc, sendTelegram, telegramReady, type AlertSettings } from "./telegram";
 import { fmtPrice, type Candle } from "./trend";
 
+// A line holding anything tagged 🆕 is sent as a Telegram spoiler (hidden until tapped). The digest uses HTML parse mode.
+const spoilerIfNew = (line: string) => (line.includes("🆕") ? `<tg-spoiler>${line}</tg-spoiler>` : line);
+
 const NEW_WINDOW = "2 hours"; // a Gold signal or fib hit older than this when first seen isn't sent (no backlog floods)
 const TF_ORDER = ["5m", "15m", "30m", "1h", "2h", "4h", "1D", "1W"];
 const tfSort = (a: string, b: string) => (TF_ORDER.indexOf(a) + 1 || 99) - (TF_ORDER.indexOf(b) + 1 || 99);
@@ -117,7 +120,7 @@ export async function sendDigest(sql: postgres.Sql, settings: AlertSettings, err
     for (const code of ["GOLD_BUY", "GOLD_SELL"]) {
       const tfs = latest.filter((g) => g.code === code).sort((a, b) => tfSort(a.tf, b.tf))
         .map((g) => `${tfLabel(g.tf)}${newGoldIds.has(g.id) ? " 🆕" : ""}`);
-      if (tfs.length) lines.push(`${code === "GOLD_BUY" ? "🔥" : "❄️"} ${SIGNAL_BY_CODE[code].name} - ${tfs.join(", ")}`);
+      if (tfs.length) lines.push(spoilerIfNew(`${code === "GOLD_BUY" ? "🔥" : "❄️"} ${SIGNAL_BY_CODE[code].name} - ${tfs.join(", ")}`));
     }
     // Latest BOS/CHoCH on each timeframe (shown once the BOS/CHoCH alert is on)
     if (settings.structureNew) {
@@ -126,7 +129,7 @@ export async function sendDigest(sql: postgres.Sql, settings: AlertSettings, err
       for (const def of SIGNALS.filter((d) => d.source === "structure")) {
         const tfs = structure.filter((g) => g.code === def.code).sort((a, b) => tfSort(a.tf, b.tf))
           .map((g) => `${tfLabel(g.tf)}${newGoldIds.has(g.id) ? " 🆕" : ""}`);
-        if (tfs.length) lines.push(`${def.direction === "bull" ? "📈" : "📉"} ${def.name} - ${tfs.join(", ")}`);
+        if (tfs.length) lines.push(spoilerIfNew(`${def.direction === "bull" ? "📈" : "📉"} ${def.name} - ${tfs.join(", ")}`));
       }
     }
     // The new fib hits, and the latest earlier hit on each other timeframe
@@ -139,8 +142,8 @@ export async function sendDigest(sql: postgres.Sql, settings: AlertSettings, err
     for (const h of shown) {
       const confluence = gold.has(`${symbol}|${h.direction}`);
       const dot = confluence ? "🟡" : h.direction === "bull" ? "🟢" : "🔴";
-      lines.push(`${dot} Fib - ${tfLabel(h.tf)} ${h.ratio} fib hit · ${fmtPrice(h.level)}${newHitIds.has(h.id) ? " 🆕" : ""}` +
-        (confluence ? ` (Gold ${h.direction === "bull" ? "Buy" : "Sell"} confluence)` : ""));
+      lines.push(spoilerIfNew(`${dot} Fib - ${tfLabel(h.tf)} ${h.ratio} fib hit · ${fmtPrice(h.level)}${newHitIds.has(h.id) ? " 🆕" : ""}` +
+        (confluence ? ` (Gold ${h.direction === "bull" ? "Buy" : "Sell"} confluence)` : "")));
     }
     blocks.push(lines.join("\n"));
   }
