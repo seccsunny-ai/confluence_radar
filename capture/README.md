@@ -1,5 +1,7 @@
 # Automatic hourly capture
 
+Step-by-step help for the Windows PC (adding profiles, stopping and restarting the hourly task) is in `readme.txt`.
+
 Opens each TradingView chart layout, reads the signals the screeners write to **Pine Logs**, and uploads them to Confluence Radar as text. A layout with `"mode": "screenshot"`, or no `mode`, uploads a screenshot instead (the older way).
 
 Pine Logs mode needs the export versions of the screeners (the ones that write `# Confluence Radar: …` entries) on the layout. If a layout has two screeners, both are read. Trends, fibs and Telegram alerts run on the site itself and need nothing from here.
