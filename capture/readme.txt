@@ -1,9 +1,14 @@
 CONFLUENCE RADAR CAPTURE - HOW TO ADD PROFILES, STOP AND RESTART
 =================================================================
 
-This guide is for the capture script that runs on your Windows PC in:
+This guide is for the capture script that runs on a Windows PC. On your home
+PC it is in:
 
     C:\Users\seccs\Documents\Tradingview Script\confluence_radar-main\capture
+
+To run it from any other PC (for example a laptop when you travel), follow
+section 11 first. After that, every other section works the same there; just
+use the capture folder on that PC instead of the path above.
 
 Every hour, Windows Task Scheduler runs a task called "Confluence Radar capture".
 The task runs "node capture.mjs", which opens each TradingView chart listed in
@@ -22,6 +27,7 @@ Contents
   8. Checking that it works
   9. Problems and fixes
  10. Settings in config.json
+ 11. Running it from another PC (when you travel)
 
 
 -----------------------------------------------------------------
@@ -47,8 +53,8 @@ config.json
 
 Several steps below ask you to type a command. Do it like this:
 
-  1. Open File Explorer and go to
-     C:\Users\seccs\Documents\Tradingview Script\confluence_radar-main\capture
+  1. Open File Explorer and go to the capture folder (on your home PC:
+     C:\Users\seccs\Documents\Tradingview Script\confluence_radar-main\capture)
   2. Click once in the address bar at the top (where the folder path is shown)
      so the path turns blue.
   3. Type   cmd   and press Enter.
@@ -372,3 +378,71 @@ Remove it again afterwards so the windows do not pop up every hour.
 
 After changing any setting, save the file and run the check in section 3,
 Step 5. The next hourly run uses the new settings.
+
+
+-----------------------------------------------------------------
+11. RUNNING IT FROM ANOTHER PC (WHEN YOU TRAVEL)
+-----------------------------------------------------------------
+
+The capture can run on any Windows PC. Three things are NOT in the GitHub
+download and have to be made again on each PC:
+  - config.json (your settings, chart addresses and site password)
+  - the "profiles" folder (the TradingView sign-ins)
+  - the hourly scheduled task
+
+Before you travel (do this once, on your home PC)
+  1. Keep a copy of your config.json somewhere you can reach from anywhere,
+     for example email it to yourself or put it in Google Drive. It contains
+     your site password, so keep it private.
+  2. Make sure you know the TradingView email and password for every account
+     you use (one per profile). You will sign in again on the new PC.
+  3. Decide what the home PC should do while you are away:
+       - If it stays on at home, leave it running and do NOT set up the
+         hourly task on the travel PC. Two PCs capturing the same charts
+         do the work twice and can make Pine Logs stall.
+       - If you switch it off or want the travel PC to take over, pause the
+         home task first (section 6, B) and enable it again when you are
+         back (section 7, A).
+
+Setting up the travel PC (about 15 minutes)
+  1. Install Node.js: go to https://nodejs.org, download the "LTS" version,
+     run the installer and click Next through it with the default choices.
+  2. Install Google Chrome if the PC does not have it.
+  3. Download the code: go to
+         https://github.com/seccsunny-ai/confluence_radar
+     sign in to GitHub, click the green "Code" button, then "Download ZIP".
+     Right-click the downloaded ZIP, choose "Extract All...", and extract it
+     into a folder of your choice, for example Documents.
+  4. Open the "capture" folder inside the extracted folder and open a
+     Command Prompt there (section 2).
+  5. Type:
+         npm install
+     and wait until it finishes (a minute or two).
+  6. Put your saved config.json into this capture folder. If you do not have
+     it, copy config.example.json, rename the copy to config.json and fill it
+     in as described in section 3 (your chart addresses and password).
+  7. Sign in once for every profile used in config.json, for example:
+         node capture.mjs login 1
+         node capture.mjs login 2
+         node capture.mjs login 3
+         node capture.mjs login 4
+     Each one opens a Chrome window: sign in to TradingView with that
+     profile's account, then close the window.
+  8. Test it:
+         node capture.mjs
+     Every chart should print a line with its number of signals.
+  9. Only if this PC should run it every hour (see "Before you travel",
+     step 3): create the scheduled task as in section 7, C, from the
+     Command Prompt in this capture folder.
+
+When you are done with the travel PC
+  - Delete its scheduled task (section 6, C) so it stops capturing.
+  - To remove your sign-ins from that PC, delete the whole extracted folder
+    (it contains config.json and the profiles folder).
+  - Enable the task on your home PC again if you paused it (section 7, A).
+
+No PC at all?
+  The repository can also capture from GitHub's servers every hour, with no
+  PC switched on. That uses TradingView login cookies instead of a sign-in
+  and TradingView may sign those out more often. The steps are in README.md
+  in the capture folder, under "GitHub Actions".
