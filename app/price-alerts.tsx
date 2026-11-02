@@ -35,6 +35,7 @@ export function PriceAlerts({ fmt, refresh, alarm, setAlarm }: {
   const [level, setLevel] = useState("custom"); // "custom" or "<fib id>:<ratio>"
   const [custom, setCustom] = useState("");
   const [note, setNote] = useState("");
+  const [editing, setEditing] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [n, setN] = useState(0);
@@ -50,7 +51,6 @@ export function PriceAlerts({ fmt, refresh, alarm, setAlarm }: {
   const symFibs = useMemo(() => fibs
     .filter((f) => f.active && f.symbol === sym)
     .sort((a, b) => TF_ORDER.indexOf(a.tf) - TF_ORDER.indexOf(b.tf)), [fibs, sym]);
-  useEffect(() => setLevel("custom"), [sym]);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,17 +58,27 @@ export function PriceAlerts({ fmt, refresh, alarm, setAlarm }: {
     setBusy(true);
     try {
       const [fibId, ratio] = level === "custom" ? [] : level.split(":").map(Number);
-      await send("/api/price-alerts", "POST", level === "custom"
+      await send(editing ? `/api/price-alerts/${editing}` : "/api/price-alerts", editing ? "PATCH" : "POST", level === "custom"
         ? { symbol: sym, level: custom, note }
         : { symbol: sym, fibId, ratio, note });
-      setCustom("");
-      setNote("");
+      reset();
       setN((x) => x + 1);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setBusy(false);
     }
+  };
+  const reset = () => { setEditing(null); setCustom(""); setNote(""); setLevel("custom"); };
+  const edit = (a: PriceAlertRow) => {
+    const f = fibs.find((x) => x.id === a.fib_id && x.active);
+    const lv = f && fibLevels(f).find((l) => Math.abs(l.price - a.level) <= Math.abs(a.level) * 1e-8);
+    setEditing(a.id);
+    setSymbol(a.symbol);
+    setLevel(f && lv ? `${f.id}:${lv.ratio}` : "custom");
+    setCustom(f && lv ? "" : String(a.level));
+    setNote(a.note ?? "");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
   const act = async (a: PriceAlertRow, what: "rearm" | "delete") => {
     if (what === "delete" && !window.confirm(`Delete the ${a.symbol} alert at ${price(a.level)}?`)) return;
@@ -91,7 +101,7 @@ export function PriceAlerts({ fmt, refresh, alarm, setAlarm }: {
         {list.map((a) => {
           const dist = a.price ? ((a.level - a.price) / a.price) * 100 : null;
           return (
-            <tr key={a.id} className={done ? "hit-row hit-custom" : undefined}>
+            <tr key={a.id} className={done ? "hit-row hit-custom" : undefined} style={editing === a.id ? { outline: "1px solid var(--accent)" } : undefined}>
               <td><b>{a.symbol}</b><div className="small muted">set {fmt(a.created_at)}</div></td>
               <td className="nowrap">
                 <b>{price(a.level)}</b>
@@ -106,6 +116,7 @@ export function PriceAlerts({ fmt, refresh, alarm, setAlarm }: {
                   : <>{price(a.price)}{dist != null && <span className="small muted"> ({dist > 0 ? "+" : ""}{dist.toFixed(2)}% to go)</span>}</>}
               </td>
               <td className="nowrap">
+                <button className="btn small" onClick={() => edit(a)}>Edit</button>{" "}
                 {done && <><button className="btn small" onClick={() => act(a, "rearm")}>Watch again</button>{" "}</>}
                 <button className="btn danger small" onClick={() => act(a, "delete")}>Delete</button>
               </td>
@@ -119,7 +130,7 @@ export function PriceAlerts({ fmt, refresh, alarm, setAlarm }: {
   return (
     <>
       <form className="panel" onSubmit={add}>
-        <h3 style={{ marginTop: 0 }}>New alert</h3>
+        <h3 style={{ marginTop: 0 }}>{editing ? "Edit alert" : "New alert"}</h3>
         <div className="muted small" style={{ marginBottom: 8 }}>
           Pick a symbol from the list or type any Bitget perpetual (e.g. BTCUSDT.P). For a symbol with fibs drawn, you can pick one of their levels,
           or type your own price. The alert fires once, the first time price reaches the level after you set it (checked every 15 minutes with
@@ -128,7 +139,7 @@ export function PriceAlerts({ fmt, refresh, alarm, setAlarm }: {
         </div>
         <div className="row">
           <input type="text" list="alert-symbols" placeholder="Symbol, e.g. BTCUSDT.P" value={symbol}
-            onChange={(e) => setSymbol(e.target.value)} required />
+            onChange={(e) => { setSymbol(e.target.value); setLevel("custom"); }} required />
           <datalist id="alert-symbols">{symbols.map((s) => <option key={s} value={s} />)}</datalist>
           <select value={level} onChange={(e) => setLevel(e.target.value)}>
             <option value="custom">My own price</option>
@@ -142,11 +153,13 @@ export function PriceAlerts({ fmt, refresh, alarm, setAlarm }: {
             <input type="text" inputMode="decimal" placeholder="Price" value={custom} onChange={(e) => setCustom(e.target.value)} required />
           )}
           <input type="text" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} className="grow" maxLength={300} />
-          <button className="btn primary" type="submit" disabled={busy || !sym}>{busy ? "Adding…" : "Add alert"}</button>
+          <button className="btn primary" type="submit" disabled={busy || !sym}>{busy ? "Saving…" : editing ? "Save alert" : "Add alert"}</button>
+          {editing && <button className="btn" type="button" onClick={reset}>Cancel</button>}
         </div>
         {sym && symbols.length > 0 && !symFibs.length && (
           <div className="small muted" style={{ marginTop: 6 }}>No fibs drawn for {sym} right now, so type a price.</div>
         )}
+        {editing && <div className="small muted" style={{ marginTop: 6 }}>Changing the symbol or level watches the alert again from now; changing only the note keeps it as it is.</div>}
         {err && <div className="status-err">{err}</div>}
         <div className="row small" style={{ marginTop: 10 }}>
           <label><input type="checkbox" checked={alarm.on} onChange={(e) => setAlarm({ on: e.target.checked })} /> Alarm on</label>

@@ -3,7 +3,9 @@
 // Telegram as its own message. The site's alarm picks it up from the triggered rows.
 import type postgres from "postgres";
 import { z } from "zod";
-import { candlesSince } from "./market";
+import { fibLevels } from "./fibs";
+import { bitgetSymbol, candlesSince, lastPrices } from "./market";
+import { normalizeSymbol } from "./signals";
 import { esc, sendTelegram, telegramReady, type AlertSettings } from "./telegram";
 import { fmtPrice, type Candle } from "./trend";
 
@@ -34,6 +36,37 @@ export const PriceAlertInput = z.object({
   ratio: z.coerce.number().positive().optional(),
   note: z.string().trim().max(300).optional().nullable(),
 }).refine((a) => a.level != null || (a.fibId != null && a.ratio != null), "Pick a fib level or type a price.");
+
+/**
+ * Works out an alert from what the form sent: the level (from the fib, when one was picked), its label, and which way
+ * price has to move to get there from now. Throws a readable error for a fib that's gone or a symbol Bitget doesn't list.
+ * `keep` is the alert being edited: a typed price equal to its old level keeps the old fib label.
+ */
+export async function resolveAlert(sql: postgres.Sql, a: z.infer<typeof PriceAlertInput>, keep?: Pick<PriceAlert, "level" | "fib_id" | "fib_label">) {
+  const symbol = normalizeSymbol(a.symbol);
+  let level = a.level ?? 0, fibId: number | null = null, label: string | null = null;
+  if (a.fibId != null) {
+    const [f] = await sql`SELECT * FROM fibs WHERE id = ${a.fibId}`;
+    if (!f) throw new Error("That fib is gone (price closed beyond it). Pick another level.");
+    const lv = fibLevels(f as never).find((l) => Math.abs(l.ratio - a.ratio!) < 1e-9);
+    if (!lv) throw new Error(`That fib has no ${a.ratio} level.`);
+    level = Number(lv.price.toPrecision(10));
+    fibId = f.id;
+    label = `${f.tf.replace(/h$/, "H")} ${f.direction === "bull" ? "green" : "red"} fib ${lv.ratio}${f.source === "auto" ? "" : " (mine)"}`;
+  } else if (keep && Math.abs(keep.level - level) < 1e-12) {
+    [fibId, label] = [keep.fib_id, keep.fib_label];
+  }
+  let live: Map<string, number> | null = null;
+  try {
+    live = await lastPrices();
+  } catch { /* Bitget out of reach for a moment: the first check works the direction out */ }
+  if (live && live.size && !live.has(bitgetSymbol(symbol))) {
+    throw new Error(`Bitget has no ${bitgetSymbol(symbol)} perpetual. Check the symbol, e.g. BTCUSDT.P.`);
+  }
+  const [trend] = await sql`SELECT price FROM trends WHERE symbol = ${symbol} AND tf = '15m'`;
+  const price: number | null = live?.get(bitgetSymbol(symbol)) ?? trend?.price ?? null;
+  return { symbol, level, fibId, label, note: a.note || null, price, direction: directionTo(level, price) };
+}
 
 /** Which way price has to move to reach the level from `price`. */
 export const directionTo = (level: number, price: number | null | undefined): "up" | "down" | null =>

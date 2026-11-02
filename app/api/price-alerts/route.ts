@@ -1,16 +1,12 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { fibLevels } from "@/lib/fibs";
 import { bitgetSymbol, lastPrices } from "@/lib/market";
-import { directionTo, PriceAlertInput } from "@/lib/price-alerts";
-import { normalizeSymbol } from "@/lib/signals";
+import { PriceAlertInput, resolveAlert } from "@/lib/price-alerts";
 import { fail } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 // Bitget's API refuses some US addresses (see /api/tick)
 export const preferredRegion = "sin1";
-
-const tfLabel = (tf: string) => tf.replace(/h$/, "H");
 
 /** Live prices, or an empty map when Bitget can't be reached right now. */
 async function prices(): Promise<Map<string, number> | null> {
@@ -61,30 +57,13 @@ export async function POST(req: Request) {
   try {
     const parsed = PriceAlertInput.safeParse(await req.json());
     if (!parsed.success) return fail(parsed.error.issues.map((i) => i.message).join(" "), 400);
-    const a = parsed.data;
-    const symbol = normalizeSymbol(a.symbol);
     const sql = await db();
-    let level = a.level ?? 0, fibId: number | null = null, label: string | null = null;
-    if (a.fibId != null) {
-      const [f] = await sql`SELECT * FROM fibs WHERE id = ${a.fibId}`;
-      if (!f) return fail("That fib is gone (price closed beyond it). Pick another level.", 400);
-      const lv = fibLevels(f as never).find((l) => Math.abs(l.ratio - a.ratio!) < 1e-9);
-      if (!lv) return fail(`That fib has no ${a.ratio} level.`, 400);
-      level = Number(lv.price.toPrecision(10));
-      fibId = f.id;
-      label = `${tfLabel(f.tf)} ${f.direction === "bull" ? "green" : "red"} fib ${lv.ratio}${f.source === "auto" ? "" : " (mine)"}`;
-    }
-    const live = await prices();
-    if (live && live.size && !live.has(bitgetSymbol(symbol))) {
-      return fail(`Bitget has no ${bitgetSymbol(symbol)} perpetual. Check the symbol, e.g. BTCUSDT.P.`, 400);
-    }
-    const [trend] = await sql`SELECT price FROM trends WHERE symbol = ${symbol} AND tf = '15m'`;
-    const now = live?.get(bitgetSymbol(symbol)) ?? trend?.price ?? null;
+    const a = await resolveAlert(sql, parsed.data);
     const [row] = await sql`
       INSERT INTO price_alerts (symbol, level, direction, fib_id, fib_label, note)
-      VALUES (${symbol}, ${level}, ${directionTo(level, now)}, ${fibId}, ${label}, ${a.note || null})
+      VALUES (${a.symbol}, ${a.level}, ${a.direction}, ${a.fibId}, ${a.label}, ${a.note})
       RETURNING *`;
-    return NextResponse.json({ ...row, price: now });
+    return NextResponse.json({ ...row, price: a.price });
   } catch (e) {
     return fail(e, 400);
   }
