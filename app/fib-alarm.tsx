@@ -32,7 +32,8 @@ export interface AlarmSettings {
 const DEFAULT_ALARM: AlarmSettings = { on: false, volume: 0.7, sounds: { bull: "rise", bear: "fall", gold: "bell", custom: "alarm" }, notify: false, only: "all" };
 
 type Note = [freq: number, start: number, dur: number, wave: OscillatorType];
-export const SOUNDS: Record<string, { label: string; notes: Note[] }> = {
+// Synthesised tones, plus sound files the owner added (in public/sounds)
+export const SOUNDS: Record<string, { label: string; notes?: Note[]; file?: string }> = {
   rise: { label: "Rising chime", notes: [[523, 0, 0.18, "triangle"], [659, 0.15, 0.18, "triangle"], [784, 0.3, 0.45, "triangle"]] },
   fall: { label: "Falling chime", notes: [[784, 0, 0.18, "triangle"], [659, 0.15, 0.18, "triangle"], [523, 0.3, 0.45, "triangle"]] },
   bell: { label: "Bell", notes: [[660, 0, 1.6, "sine"], [1320, 0, 1.0, "sine"], [1980, 0, 0.6, "sine"], [660, 0.5, 1.4, "sine"]] },
@@ -43,6 +44,9 @@ export const SOUNDS: Record<string, { label: string; notes: Note[] }> = {
     label: "Alarm clock",
     notes: Array.from({ length: 10 }, (_, i): Note => [i % 2 ? 1000 : 750, i * 0.16, 0.14, "sawtooth"]),
   },
+  crazy: { label: "Verrückter Ton", file: "/sounds/verrueckter-ton.mp3" },
+  scratch: { label: "Scratch", file: "/sounds/scratch.mp3" },
+  cnote: { label: "C note", file: "/sounds/c-note.mp3" },
 };
 
 let ctx: AudioContext | null = null;
@@ -57,8 +61,14 @@ export function playSound(name: string, volume: number) {
   const ac = audio();
   const s = SOUNDS[name] ?? SOUNDS.bell;
   if (!ac) return;
+  if (s.file) {
+    const el = new Audio(s.file);
+    el.volume = Math.min(Math.max(volume, 0), 1);
+    el.play().catch(() => {}); // blocked until the page has been clicked, like the tones
+    return;
+  }
   const t0 = ac.currentTime + 0.02;
-  for (const [freq, start, dur, wave] of s.notes) {
+  for (const [freq, start, dur, wave] of s.notes ?? []) {
     const osc = ac.createOscillator();
     const gain = ac.createGain();
     osc.type = wave;
