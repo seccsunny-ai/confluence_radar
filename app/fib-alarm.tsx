@@ -47,6 +47,8 @@ export const SOUNDS: Record<string, { label: string; notes?: Note[]; file?: stri
   crazy: { label: "Verrückter Ton", file: "/sounds/verrueckter-ton.mp3" },
   scratch: { label: "Scratch", file: "/sounds/scratch.mp3" },
   cnote: { label: "C note", file: "/sounds/c-note.mp3" },
+  fwip: { label: "Drum fwip", file: "/sounds/drum-fwip.mp3" },
+  bow: { label: "Bow accent", file: "/sounds/bow-accent.mp3" },
 };
 
 let ctx: AudioContext | null = null;
