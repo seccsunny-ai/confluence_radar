@@ -249,6 +249,10 @@ export function Fibs({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
   const [err, setErr] = useState("");
   const [n, setN] = useState(0);
   useEffect(() => { getJson<FibRow[]>("/api/fibs").then(setRows).catch((e) => setErr(e.message)); }, [refresh, n]);
+  // Symbols to pick from: every symbol with a signal, plus those with fibs
+  const [signalSymbols, setSignalSymbols] = useState<string[]>([]);
+  useEffect(() => { getJson<Array<{ symbol: string }>>("/api/symbols").then((r) => setSignalSymbols(r.map((x) => x.symbol))).catch(() => {}); }, [refresh]);
+  const symbolList = useMemo(() => [...new Set([...signalSymbols, ...(rows ?? []).map((f) => f.symbol)])].sort(), [signalSymbols, rows]);
   const set = (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [k]: e.target.value });
   const shown = rows?.filter((f) => (!symbol || f.symbol.includes(symbol.toUpperCase())) && (!kind || f.source === kind) && (!tf || f.tf === tf));
   const preview = Number(form.high) > Number(form.low) && Number(form.low) > 0
@@ -292,7 +296,8 @@ export function Fibs({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
           closes beyond its start after you added it.
         </div>
         <div className="row">
-          <input type="text" placeholder="Symbol, e.g. BTCUSDT.P" value={form.symbol} onChange={set("symbol")} required />
+          <input type="text" list="fib-symbols" placeholder="Symbol, e.g. BTCUSDT.P" value={form.symbol} onChange={set("symbol")} required />
+          <datalist id="fib-symbols">{symbolList.map((s) => <option key={s} value={s} />)}</datalist>
           <select value={form.tf} onChange={set("tf")}>{FIB_TFS.map((t) => <option key={t} value={t}>{tfLabel(t)}</option>)}</select>
           <select value={form.direction} onChange={set("direction")}>
             <option value="bull">🟢 Green (bullish retest)</option>
