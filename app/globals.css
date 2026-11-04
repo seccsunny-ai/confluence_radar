@@ -101,3 +101,4 @@ details summary { cursor: pointer; }
 .toast { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; border-radius: 8px; padding: 10px 12px;
   font-weight: 600; font-size: 13px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); }
 .toast .x { background: none; border: none; color: inherit; cursor: pointer; font-size: 16px; line-height: 1; }
+.alarm-locked { position: fixed; top: 0; left: 0; right: 0; z-index: 60; padding: 10px 16px; background: #7c2d12; color: #fff7ed; font-size: 14px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,.4); cursor: pointer; }
