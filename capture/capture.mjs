@@ -63,6 +63,34 @@ async function openLayout(ctx, layout) {
   return page;
 }
 
+// TradingView's promo pop-ups ("Don't miss this Early Bird", sale offers) cover the chart and the legend menus,
+// and Escape doesn't close them. Each profile sees them on its own schedule, so close them before every step.
+const POPUP = '[role="dialog"], [data-dialog-name], [class*="dialog" i], [class*="modal" i], [class*="popup" i]';
+const POPUP_CLOSE = [
+  '[data-name="close"]', '[data-qa-id="close"]', '[data-name="close-button"]', '[data-qa-id="close-button"]',
+  'button[aria-label="Close" i]', '[aria-label="Close" i]', '[class*="close" i]',
+].join(", ");
+
+/** Closes any promo or notice pop-up on the page; returns how many it closed. */
+async function dismissPopups(page, notes = []) {
+  await page.keyboard.press("Escape").catch(() => {});
+  let closed = 0;
+  for (let round = 0; round < 3; round++) {
+    const buttons = page.locator(POPUP).locator(POPUP_CLOSE);
+    let clicked = false;
+    for (let i = 0, n = await buttons.count().catch(() => 0); i < n; i++) {
+      const b = buttons.nth(i);
+      if (!(await b.isVisible().catch(() => false))) continue;
+      await b.click({ timeout: 2000 }).then(() => { clicked = true; closed++; }).catch(() => {});
+      await page.waitForTimeout(400);
+      break; // the list changes once a pop-up closes
+    }
+    if (!clicked) break;
+  }
+  if (closed) notes.push(`closed ${closed} pop-up(s)`);
+  return closed;
+}
+
 function saveShot(layout, png) {
   mkdirSync(join(here, "shots"), { recursive: true });
   writeFileSync(join(here, "shots", `${layout.name}.png`), png); // last capture, for checking by eye
@@ -74,7 +102,7 @@ async function captureOne(layout) {
     const page = await openLayout(ctx, layout);
     // Screener tables are drawn after every symbol's data loads, which takes a while on a 10-symbol screener.
     await page.waitForTimeout((config.waitSeconds ?? 25) * 1000);
-    await page.keyboard.press("Escape"); // dismiss any popup
+    await dismissPopups(page);
     const png = await page.screenshot({ type: "png" });
     saveShot(layout, png);
     return png;
@@ -188,6 +216,7 @@ async function openPineLogs(page, notes, found) {
     for (let attempt = 0; ; attempt++) {
       let got = 0;
       try {
+        await dismissPopups(page, notes); // a pop-up can appear at any time and swallow the legend clicks
         got = await readPineLogs(page, k, notes, found);
       } catch (e) {
         notes.push(`legend ${k}: ${e.message.split("\n")[0]}`);
@@ -198,7 +227,7 @@ async function openPineLogs(page, notes, found) {
       await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
       await page.locator("canvas").first().waitFor({ timeout: 30000 }).catch(() => {});
       await page.waitForTimeout((config.refreshWaitSeconds ?? 15) * 1000);
-      await page.keyboard.press("Escape").catch(() => {});
+      await dismissPopups(page, notes);
       await expandLegend(page, notes);
     }
   }
@@ -233,7 +262,7 @@ async function capturePine(layout) {
     ctx.pages().forEach(watch);
     const page = await openLayout(ctx, layout);
     await page.waitForTimeout((config.waitSeconds ?? 25) * 1000);
-    await page.keyboard.press("Escape");
+    await dismissPopups(page, notes);
     notes.push(`entries from websocket: ${found.size}`);
     // Always open every indicator's logs: a panel left open in the saved layout shows only one of them.
     await openPineLogs(page, notes, found);
@@ -242,6 +271,7 @@ async function capturePine(layout) {
       const body = await page.locator("body").innerText();
       notes.push("page text lines mentioning Pine or Confluence:", ...body.split("\n").filter((l) => /pine|confluence/i.test(l)).slice(0, 50));
     }
+    await dismissPopups(page, notes);
     saveShot(layout, await page.screenshot({ type: "png" }));
     return [...found];
   } finally {
