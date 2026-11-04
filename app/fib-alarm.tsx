@@ -5,6 +5,8 @@ import { getJson } from "./ui";
 
 // The alarm: while the site is open it checks every minute for new fib hits and for the user's own price alerts that
 // fired, and plays a sound (and can show a browser notification). Both are found by the background check every 15 minutes.
+// Browsers block page sound until the page has been clicked since it was loaded; the alarm says so loudly, falls back
+// to a system notification, and plays the blocked ring on the next click.
 
 type Fmt = (s: string) => string;
 export type Kind = "bull" | "bear" | "gold" | "custom";
@@ -51,23 +53,70 @@ export const SOUNDS: Record<string, { label: string; notes?: Note[]; file?: stri
   bow: { label: "Bow accent", file: "/sounds/bow-accent.mp3" },
 };
 
+// One AudioContext plays everything (tones and the mp3 files), so a single click on the page unlocks every sound and
+// its state tells us truthfully whether sound can play. Browsers keep it "suspended" until the page has been clicked or
+// typed in since it was (re)loaded.
 let ctx: AudioContext | null = null;
 function audio(): AudioContext | null {
   if (typeof window === "undefined") return null;
   ctx ??= new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-  if (ctx.state === "suspended") ctx.resume().catch(() => {});
+  if (ctx.state !== "running") ctx.resume().catch(() => {});
   return ctx;
 }
 
-export function playSound(name: string, volume: number) {
+/** True once this page has been clicked or typed in since it loaded, which browsers require before playing sound. */
+export function soundAllowed(): boolean {
+  if (typeof window === "undefined") return false;
+  if (ctx?.state === "running") return true;
+  const ua = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation;
+  return ua ? ua.hasBeenActive : false;
+}
+
+const buffers = new Map<string, Promise<AudioBuffer | null>>();
+function loadFile(file: string): Promise<AudioBuffer | null> {
+  const ac = audio();
+  if (!ac) return Promise.resolve(null);
+  let p = buffers.get(file);
+  if (!p) {
+    p = fetch(file).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+      .then((b) => ac.decodeAudioData(b))
+      .catch(() => { buffers.delete(file); return null; });
+    buffers.set(file, p);
+  }
+  return p;
+}
+
+/** Fetches the mp3 sounds ahead of time, so a ring doesn't wait on the network. */
+export function preloadSounds(names: string[]) {
+  for (const n of names) if (SOUNDS[n]?.file) loadFile(SOUNDS[n].file!);
+}
+
+/** Plays a sound. Resolves to false when the browser blocked it (the page hasn't been clicked since it loaded). */
+export async function playSound(name: string, volume: number): Promise<boolean> {
   const ac = audio();
   const s = SOUNDS[name] ?? SOUNDS.bell;
-  if (!ac) return;
+  if (!ac) return false;
+  if (ac.state !== "running") {
+    // resume() only works after a click; give it a moment, then report the sound as blocked
+    await Promise.race([ac.resume().catch(() => {}), new Promise((r) => setTimeout(r, 300))]);
+    if ((ac.state as AudioContextState) !== "running") return false;
+  }
+  const vol = Math.min(Math.max(volume, 0), 1);
   if (s.file) {
-    const el = new Audio(s.file);
-    el.volume = Math.min(Math.max(volume, 0), 1);
-    el.play().catch(() => {}); // blocked until the page has been clicked, like the tones
-    return;
+    const buf = await loadFile(s.file);
+    if (!buf) {
+      // Couldn't decode it: fall back to a plain <audio> element
+      const el = new Audio(s.file);
+      el.volume = vol;
+      return el.play().then(() => true, () => false);
+    }
+    const src = ac.createBufferSource();
+    const gain = ac.createGain();
+    src.buffer = buf;
+    gain.gain.value = vol;
+    src.connect(gain).connect(ac.destination);
+    src.start();
+    return true;
   }
   const t0 = ac.currentTime + 0.02;
   for (const [freq, start, dur, wave] of s.notes ?? []) {
@@ -75,7 +124,7 @@ export function playSound(name: string, volume: number) {
     const gain = ac.createGain();
     osc.type = wave;
     osc.frequency.value = freq;
-    const peak = Math.max(0.0001, volume * (wave === "sine" || wave === "triangle" ? 0.45 : 0.12));
+    const peak = Math.max(0.0001, vol * (wave === "sine" || wave === "triangle" ? 0.45 : 0.12));
     gain.gain.setValueAtTime(0.0001, t0 + start);
     gain.gain.exponentialRampToValueAtTime(peak, t0 + start + 0.01);
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + start + dur);
@@ -83,6 +132,7 @@ export function playSound(name: string, volume: number) {
     osc.start(t0 + start);
     osc.stop(t0 + start + dur + 0.05);
   }
+  return true;
 }
 
 export const KIND_LABEL: Record<Kind, string> = {
@@ -129,21 +179,49 @@ export function useAlarm(): [AlarmSettings, (patch: Partial<AlarmSettings>) => v
   return [s, update];
 }
 
+const SEEN_KEY = "fibAlarmSeen";
+const CATCH_UP_MS = 3 * 3600_000; // after a reload, still ring for what came in during the last 3 hours
+
 /** Watches for new fib hits and fired price alerts while the page is open; rings and shows them in the corner. */
 export function FibAlarm({ alarm, setAlarm, onHits }: { alarm: AlarmSettings; setAlarm: (p: Partial<AlarmSettings>) => void; onHits: () => void }) {
   const lastId = useRef<number | null>(null);
   const lastAlert = useRef<string | null>(null); // detected_at of the newest fired price alert seen
+  const pending = useRef<Kind | null>(null); // a ring the browser blocked, played on the next click
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [blocked, setBlocked] = useState(false);
+  const [armed, setArmed] = useState(true);
+  const [unseen, setUnseen] = useState(0);
 
-  const ring = useCallback((items: Toast[], title: string) => {
+  // Remember what was already rung, so a reload (or Chrome putting the tab to sleep and reloading it) still rings for
+  // what came in meanwhile, instead of silently starting from "now"
+  useEffect(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(SEEN_KEY) ?? "null") as { hit: number; alert: string; at: number } | null;
+      if (v && Date.now() - v.at < CATCH_UP_MS) { lastId.current ??= v.hit; lastAlert.current ??= v.alert; }
+    } catch { /* start from now */ }
+  }, []);
+  const saveSeen = () => {
+    if (lastId.current == null || lastAlert.current == null) return;
+    try { localStorage.setItem(SEEN_KEY, JSON.stringify({ hit: lastId.current, alert: lastAlert.current, at: Date.now() })); } catch { /* not saved */ }
+  };
+
+  const ring = useCallback(async (items: Toast[], title: string) => {
     if (!alarm.on || !items.length) return;
     setToasts((t) => [...items, ...t.filter((x) => !items.some((i) => i.key === x.key))].slice(0, 8));
     const kind = (["custom", "gold", "bull", "bear"] as Kind[]).find((k) => items.some((i) => i.kind === k))!;
-    playSound(alarm.sounds[kind], alarm.volume);
-    setBlocked(audio()?.state === "suspended");
-    if (alarm.notify && "Notification" in window && Notification.permission === "granted") {
-      new Notification(title, { body: items.slice(0, 4).map((i) => i.text).join("\n"), tag: kind === "custom" ? "price-alert" : "fib-hit" });
+    const played = await playSound(alarm.sounds[kind], alarm.volume);
+    if (!played) pending.current = kind;
+    setArmed(played);
+    if (document.hidden || !played) setUnseen((n) => n + items.length);
+    // A system notification makes its own sound and isn't blocked like page audio, so it is also the fallback
+    // whenever the page sound was blocked
+    if ((alarm.notify || !played) && "Notification" in window && Notification.permission === "granted") {
+      try {
+        const n = new Notification(title, {
+          body: items.slice(0, 4).map((i) => i.text).join("\n"), tag: kind === "custom" ? "price-alert" : "fib-hit",
+          requireInteraction: true, silent: false,
+        });
+        n.onclick = () => { window.focus(); n.close(); };
+      } catch { /* some browsers only allow notifications from a service worker */ }
     }
   }, [alarm]);
 
@@ -151,54 +229,114 @@ export function FibAlarm({ alarm, setAlarm, onHits }: { alarm: AlarmSettings; se
     if (lastId.current == null) {
       const rows = await getJson<LevelHit[]>("/api/level-hits?days=1");
       lastId.current = rows[0]?.id ?? 0;
+      saveSeen();
       return;
     }
     const rows = await getJson<LevelHit[]>(`/api/level-hits?after=${lastId.current}`);
     if (!rows.length) return;
     lastId.current = Math.max(lastId.current, ...rows.map((r) => r.id));
+    saveSeen();
     onHits();
     const hits = rows.filter((r) => r.active && (alarm.only === "all" || r.confluence));
-    ring(hits.map((h) => ({ key: `h${h.id}`, kind: hitKind(h), text: hitText(h) })), hits.length === 1 ? "Fib hit" : `${hits.length} fib hits`);
+    await ring(hits.map((h) => ({ key: `h${h.id}`, kind: hitKind(h), text: hitText(h) })), hits.length === 1 ? "Fib hit" : `${hits.length} fib hits`);
   }, [alarm.only, onHits, ring]);
 
   const pollAlerts = useCallback(async () => {
     if (lastAlert.current == null) {
       const { alerts } = await getJson<{ alerts: PriceAlertRow[] }>("/api/price-alerts");
       lastAlert.current = alerts.reduce((m, a) => (a.detected_at && a.detected_at > m ? a.detected_at : m), new Date(0).toISOString());
+      saveSeen();
       return;
     }
     const rows = await getJson<PriceAlertRow[]>(`/api/price-alerts?after=${encodeURIComponent(lastAlert.current)}`);
     if (!rows.length) return;
     lastAlert.current = rows.reduce((m, a) => (a.detected_at! > m ? a.detected_at! : m), lastAlert.current);
+    saveSeen();
     onHits();
-    ring(rows.map((a) => ({ key: `a${a.id}:${a.triggered_at}`, kind: "custom", text: alertText(a) })), rows.length === 1 ? "Price alert" : `${rows.length} price alerts`);
+    await ring(rows.map((a) => ({ key: `a${a.id}:${a.triggered_at}`, kind: "custom", text: alertText(a) })), rows.length === 1 ? "Price alert" : `${rows.length} price alerts`);
   }, [onHits, ring]);
 
+  const busy = useRef(false);
   const poll = useCallback(async () => {
+    if (alarm.on) setArmed(soundAllowed());
+    if (busy.current) return;
+    busy.current = true;
     // Each on its own, so one failing (offline for a moment) doesn't stop the other; both try again next minute
-    await Promise.allSettled([pollAlerts(), pollHits()]);
-  }, [pollAlerts, pollHits]);
+    try { await Promise.allSettled([pollAlerts(), pollHits()]); saveSeen(); } finally { busy.current = false; }
+  }, [alarm.on, pollAlerts, pollHits]);
 
   useEffect(() => {
     poll();
     const id = setInterval(poll, 60_000);
-    return () => clearInterval(id);
+    // Background tabs get their timers slowed down; check straight away when the tab or the network comes back
+    const again = () => { if (!document.hidden) poll(); };
+    document.addEventListener("visibilitychange", again);
+    window.addEventListener("online", again);
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", again); window.removeEventListener("online", again); };
   }, [poll]);
 
-  // Browsers only allow sound after a click on the page
+  // Chrome may freeze a background tab (stopping the checks) but leaves pages that hold a Web Lock running
   useEffect(() => {
-    const unlock = () => { if (alarm.on) { audio(); setBlocked(false); } };
-    document.addEventListener("pointerdown", unlock);
-    return () => document.removeEventListener("pointerdown", unlock);
+    if (!alarm.on || !("locks" in navigator)) return;
+    let release = () => {};
+    navigator.locks.request("confluence-radar-alarm", { mode: "shared" }, () => new Promise<void>((r) => { release = r; })).catch(() => {});
+    return () => release();
   }, [alarm.on]);
+
+  useEffect(() => { if (alarm.on) preloadSounds(Object.values(alarm.sounds)); }, [alarm.on, alarm.sounds]);
+
+  // Browsers only allow sound after a click (or key press) on the page, every time it is (re)loaded. The first one
+  // unlocks the sound, and plays a ring that was blocked before it.
+  useEffect(() => {
+    if (!alarm.on) return;
+    const unlock = async () => {
+      const ac = audio();
+      await ac?.resume().catch(() => {});
+      if ((ac?.state as AudioContextState | undefined) !== "running") return;
+      setArmed(true);
+      const k = pending.current;
+      pending.current = null;
+      if (k) playSound(alarm.sounds[k], alarm.volume);
+    };
+    document.addEventListener("pointerdown", unlock, true);
+    document.addEventListener("keydown", unlock, true);
+    return () => { document.removeEventListener("pointerdown", unlock, true); document.removeEventListener("keydown", unlock, true); };
+  }, [alarm.on, alarm.sounds, alarm.volume]);
+
+  // While rings are unseen, the tab title blinks so the tab stands out in the tab bar / taskbar
+  useEffect(() => {
+    if (!unseen) return;
+    const base = document.title.replace(/^🔔 \(\d+\) /, "");
+    let on = false;
+    const id = setInterval(() => { on = !on; document.title = on ? `🔔 (${unseen}) ${base}` : base; }, 1000);
+    const seen = () => { if (!document.hidden && document.hasFocus()) setUnseen(0); };
+    window.addEventListener("focus", seen);
+    document.addEventListener("visibilitychange", seen);
+    document.addEventListener("pointerdown", seen);
+    return () => {
+      clearInterval(id);
+      document.title = base;
+      window.removeEventListener("focus", seen);
+      document.removeEventListener("visibilitychange", seen);
+      document.removeEventListener("pointerdown", seen);
+    };
+  }, [unseen]);
+
+  const notifyOk = typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted";
 
   return (
     <>
       <button className={`btn small alarm-chip ${alarm.on ? "on" : ""}`} title="Sound when price hits a fib level or one of your alerts (while this page is open)"
         onClick={() => { const on = !alarm.on; setAlarm({ on }); if (on) playSound(alarm.sounds.gold, alarm.volume); }}>
-        {alarm.on ? "🔔 Alarm on" : "🔕 Alarm off"}
+        {alarm.on ? (armed ? "🔔 Alarm on" : "🔇 Alarm muted") : "🔕 Alarm off"}
       </button>
-      {blocked && alarm.on && <span className="warn">Click anywhere on the page to allow the alarm sound.</span>}
+      {alarm.on && !armed && (
+        <div className="alarm-locked" role="alert">
+          🔇 <b>The alarm can&apos;t make a sound yet.</b> Your browser blocks sound until you click this page after opening or
+          reloading it. Click anywhere on the page to arm it.
+          {!notifyOk && " Turn on browser notifications on the Fib hits tab too: they make a sound even when the page can't."}
+        </div>
+      )}
       {toasts.length > 0 && (
         <div className="toasts">
           {toasts.map((h) => (
@@ -234,7 +372,10 @@ export function FibHits({ fmt, refresh, alarm, setAlarm }: { fmt: Fmt; refresh: 
         <div className="small muted" style={{ marginBottom: 8 }}>
           Rings on this device while the site is open in a tab, for fib hits and for your own alerts (it checks every minute; the site
           looks for fib hits and alerts every 15 minutes).
-          Settings are kept in this browser.
+          Settings are kept in this browser. Browsers only let a page make sound after you click it, so after opening or
+          reloading the site, click anywhere once (a red bar at the top reminds you). For the most reliable alarm also tick
+          &quot;Also show a browser notification&quot;: those make a sound even when the page can&apos;t. Telegram gets the same
+          alerts if you are away from this computer.
         </div>
         <div className="row">
           <label><input type="checkbox" checked={alarm.on} onChange={(e) => { setAlarm({ on: e.target.checked }); if (e.target.checked) audio(); }} /> Alarm on</label>
