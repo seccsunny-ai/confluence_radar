@@ -337,6 +337,16 @@ function Signals({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
   const [fixed, setFixed] = useState(0); // bumped after a correction to reload
   const [allTfs, setAllTfs] = useState<string[]>(["15m", "1h", "4h", "1D"]);
   const [err, setErr] = useState("");
+  const [order, setOrder] = useState<"gold" | "time">("gold");
+  const [showFibs, setShowFibs] = useState(true);
+  const [board, setBoard] = useState<SymbolFibs[]>([]);
+  useEffect(() => {
+    setOrder(load("signals.order", "gold"));
+    setShowFibs(load("signals.showFibs", true));
+  }, []);
+  useEffect(() => {
+    getJson<SymbolFibs[]>("/api/symbol-fibs").then(setBoard).catch(() => {});
+  }, [refresh]);
 
   useEffect(() => {
     const q = new URLSearchParams();
@@ -379,6 +389,17 @@ function Signals({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
   // Signals that first appeared in the newest upload shown here.
   const newest = rows?.reduce((m, r) => (r.first_seen_at > m ? r.first_seen_at : m), "") ?? "";
 
+  const boardBySymbol = useMemo(() => new Map(board.map((b) => [b.symbol, b])), [board]);
+  // Symbols whose latest live Gold is on 15m/1H come first (newest first), then 4H/1D, then the rest.
+  const groupsBySymbol = useMemo(() => {
+    if (!rows || order !== "gold") return null;
+    const bySym = new Map<string, Signal[]>();
+    for (const r of rows) bySym.set(r.symbol, [...(bySym.get(r.symbol) ?? []), r]);
+    return [...bySym.entries()]
+      .map(([sym, list]) => ({ sym, list, rank: goldRank(boardBySymbol.get(sym)) }))
+      .sort((a, b) => a.rank.tier - b.rank.tier || b.rank.t - a.rank.t || a.sym.localeCompare(b.sym));
+  }, [rows, order, boardBySymbol]);
+
   const groups = [
     { name: "Gold", codes: ["GOLD_BUY", "GOLD_SELL"] },
     { name: "Divergence", codes: ["VMC_BULL", "VMC_BEAR", "RSI_BULL", "RSI_BEAR"] },
@@ -414,10 +435,25 @@ function Signals({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
           <input type="text" placeholder="Symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)} />
           <button className="btn" onClick={() => { setCodes([]); setTfs([]); setSince(""); setLatest(false); setSymbol(""); }}>Clear filters</button>
         </div>
+        <div className="row">
+          <span className="small muted" style={{ width: 80 }}>Order</span>
+          <select value={order} onChange={(e) => { const v = e.target.value as "gold" | "time"; setOrder(v); save("signals.order", v); }}>
+            <option value="gold">By symbol: latest 15m/1H Gold first, then 4H/1D</option>
+            <option value="time">Newest signal first</option>
+          </select>
+          {order === "gold" && (
+            <label className="small nowrap">
+              <input type="checkbox" checked={showFibs} onChange={(e) => { setShowFibs(e.target.checked); save("signals.showFibs", e.target.checked); }} /> Show each symbol&apos;s fibs (hit / waiting)
+            </label>
+          )}
+        </div>
       </div>
       {err && <div className="panel status-err">{err}</div>}
       <div className="panel tablewrap">
-        <div className="small muted" style={{ marginBottom: 8 }}>{rows ? `${rows.length} signals` : "Loading…"}</div>
+        <div className="small muted" style={{ marginBottom: 8 }}>
+          {rows ? `${rows.length} signals${groupsBySymbol ? ` across ${groupsBySymbol.length} symbols` : ""}` : "Loading…"}
+          {groupsBySymbol && <> · A symbol&apos;s Gold counts while it&apos;s inside its window (15m 2 days, 1H 7, 4H 14, 1D 21). ✅ = level already hit, ⏳ = waiting, with the distance from the price now.</>}
+        </div>
         {rows && rows.length === 0 ? (
           <div className="empty">
             No signals match these filters.
@@ -427,7 +463,9 @@ function Signals({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
           <table>
             <thead><tr><th>Symbol</th><th>Signal</th><th>TF</th><th className="nowrap">Signal time</th><th>Age</th><th className="nowrap">First seen</th><th className="nowrap">Last seen in a screenshot</th><th title="Correct a signal that was read wrongly. The fix is remembered for later uploads.">Fix</th></tr></thead>
             <tbody>
-              {rows?.map((r) => (
+              {(groupsBySymbol ?? (rows ? [{ sym: "", list: rows, rank: null }] : [])).flatMap((g) => [
+                ...(g.sym ? [<SymbolHeader key={`h-${g.sym}`} sym={g.sym} info={boardBySymbol.get(g.sym)} showFibs={showFibs} fmt={fmt} />] : []),
+                ...g.list.map((r) => (
                 <tr key={r.id} className={Date.now() - new Date(r.signal_time).getTime() < 864e5 ? "recent" : ""}>
                   <td><strong>{r.symbol}</strong></td>
                   <td><Sig code={r.code} /> <span className="small muted">{SIGNAL_BY_CODE[r.code]?.name}</span></td>
@@ -446,12 +484,85 @@ function Signals({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
                     </select>
                   </td>
                 </tr>
-              ))}
+                )),
+              ])}
             </tbody>
           </table>
         )}
       </div>
     </>
+  );
+}
+
+interface SymbolFibs {
+  symbol: string;
+  gold: Array<{ id: number; tf: string; code: string; direction: "bull" | "bear"; signal_time: string; live: boolean }>;
+  fibs: Array<{
+    id: number; tf: string; direction: "bull" | "bear"; source: "manual" | "auto"; forming: boolean; note: string | null;
+    high: number; low: number; price: number | null;
+    levels: Array<{ ratio: number; price: number; hit_at: string | null }>;
+  }>;
+}
+
+const LTF_GOLD = ["15m", "1h"];
+const HTF_GOLD = ["4h", "1D"];
+const tfLabel = (tf: string) => tf.replace(/h$/, "H");
+
+function fmtPrice(p: number | null | undefined): string {
+  if (p == null || !Number.isFinite(p)) return "–";
+  const abs = Math.abs(p);
+  return String(Number(p.toFixed(abs >= 1000 ? 1 : abs >= 1 ? 4 : abs >= 0.01 ? 6 : 8)));
+}
+
+/** tier 0 = live 15m/1H Gold, 1 = live 4H/1D Gold, 2 = none; t = newest such Gold time. */
+function goldRank(info?: SymbolFibs): { tier: number; t: number } {
+  const live = info?.gold.filter((g) => g.live) ?? [];
+  for (const [tier, tfs] of [[0, LTF_GOLD], [1, HTF_GOLD]] as const) {
+    const ts = live.filter((g) => tfs.includes(g.tf)).map((g) => new Date(g.signal_time).getTime());
+    if (ts.length) return { tier, t: Math.max(...ts) };
+  }
+  return { tier: 2, t: 0 };
+}
+
+function SymbolHeader({ sym, info, showFibs, fmt }: { sym: string; info?: SymbolFibs; showFibs: boolean; fmt: (s: string) => string }) {
+  const gold = (info?.gold ?? []).filter((g) => g.live).sort((a, b) => tfSort(a.tf, b.tf));
+  // Fibs in the direction of the newest live Gold first.
+  const newestGold = [...gold].sort((a, b) => b.signal_time.localeCompare(a.signal_time))[0];
+  const fibs = [...(info?.fibs ?? [])].sort((a, b) =>
+    Number(b.direction === newestGold?.direction) - Number(a.direction === newestGold?.direction));
+  const hit = fibs.reduce((n, f) => n + f.levels.filter((l) => l.hit_at).length, 0);
+  const waiting = fibs.reduce((n, f) => n + f.levels.filter((l) => !l.hit_at).length, 0);
+  return (
+    <tr className="symhead">
+      <td colSpan={8}>
+        <div className="row" style={{ gap: 12 }}>
+          <strong>{sym}</strong>
+          {gold.length ? gold.map((g) => (
+            <span key={g.tf} className="small nowrap"><Sig code={g.code} /> {tfLabel(g.tf)} <span className="muted">{ago(g.signal_time)}</span></span>
+          )) : <span className="small muted">no Gold inside its window</span>}
+          {showFibs && fibs.length > 0 && <span className="small muted">Fib levels: {hit} hit · {waiting} waiting</span>}
+        </div>
+        {showFibs && (fibs.length ? (
+          <div className="fiblist">
+            {fibs.map((f) => (
+              <div key={f.id} className="small" style={{ opacity: newestGold && f.direction !== newestGold.direction ? 0.6 : 1 }}>
+                <span className={`sig ${f.direction}`}>{tfLabel(f.tf)} {f.direction === "bull" ? "green" : "red"}</span>
+                <span className="muted"> {f.source === "auto" ? (f.forming ? "auto, forming" : "auto") : "mine"}{f.note ? `, ${f.note}` : ""}: </span>
+                {f.levels.map((l) => {
+                  const dist = f.price ? ((f.price - l.price) / l.price) * 100 : null;
+                  return (
+                    <span key={l.ratio} className="nowrap" style={{ marginRight: 10 }} title={l.hit_at ? `Hit ${fmt(l.hit_at)}` : "Not hit yet"}>
+                      {l.hit_at ? "✅" : "⏳"} {l.ratio} {fmtPrice(l.price)}
+                      <span className="muted">{l.hit_at ? ` hit ${ago(l.hit_at)}` : dist != null ? ` (${dist > 0 ? "+" : ""}${dist.toFixed(2)}%)` : ""}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        ) : <div className="small muted">No active fibs.</div>)}
+      </td>
+    </tr>
   );
 }
 
