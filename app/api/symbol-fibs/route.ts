@@ -27,7 +27,7 @@ export async function GET() {
         SELECT f.id, f.symbol, f.tf, f.direction, f.high, f.low, f.source, f.forming, f.note, t.price
         FROM fibs f LEFT JOIN trends t ON t.symbol = f.symbol AND t.tf = '15m'
         WHERE f.active
-        ORDER BY f.symbol, array_position(ARRAY['15m','1h','2h','4h','1D','1W'], f.tf), f.anchor_t DESC NULLS FIRST, f.created_at DESC`,
+        ORDER BY f.symbol, array_position(ARRAY['5m','15m','1h','2h','4h','8h','1D','1W'], f.tf), f.anchor_t DESC NULLS FIRST, f.created_at DESC`,
       sql`SELECT h.fib_id, h.ratio, h.level, h.hit_at FROM level_hits h JOIN fibs f ON f.id = h.fib_id AND f.active`,
     ]);
 

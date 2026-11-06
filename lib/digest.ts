@@ -2,6 +2,7 @@
 // run, sent as one message with a block per symbol. Each block also repeats the symbol's latest Gold and BOS/CHoCH
 // signal on every timeframe and its latest fib hit, so the earlier picture stays visible until something replaces it.
 import type postgres from "postgres";
+import { QUIET_FIB_TFS } from "./autofib";
 import { fibLevels, type Fib } from "./fibs";
 import { recentCandles, TF_MS } from "./market";
 import { GOLD_WINDOW_DAYS, SIGNAL_BY_CODE, SIGNALS } from "./signals";
@@ -12,7 +13,7 @@ import { fmtPrice, type Candle } from "./trend";
 const spoilerIfNew = (line: string) => (line.includes("🆕") ? `<tg-spoiler>${line}</tg-spoiler>` : line);
 
 const NEW_WINDOW = "2 hours"; // a Gold signal or fib hit older than this when first seen isn't sent (no backlog floods)
-const TF_ORDER = ["5m", "15m", "30m", "1h", "2h", "4h", "1D", "1W"];
+const TF_ORDER = ["5m", "15m", "30m", "1h", "2h", "4h", "8h", "1D", "1W"];
 const tfSort = (a: string, b: string) => (TF_ORDER.indexOf(a) + 1 || 99) - (TF_ORDER.indexOf(b) + 1 || 99);
 const tfLabel = (tf: string) => tf.replace(/h$/, "H");
 export const shortSymbol = (s: string) => s.replace(/USDT\.P$/, "");
@@ -71,7 +72,7 @@ export async function findLevelHits(sql: postgres.Sql, tolerancePct: number, err
         const [row] = await sql`
           INSERT INTO level_hits (fib_id, symbol, tf, direction, ratio, level, hit_at, confluence, sent)
           VALUES (${f.id}, ${symbol}, ${f.tf}, ${f.direction}, ${lv.ratio}, ${Number(lv.price.toPrecision(10))},
-            ${new Date(c.t)}, ${gold.has(`${symbol}|${f.direction}`)}, ${last == null})
+            ${new Date(c.t)}, ${gold.has(`${symbol}|${f.direction}`)}, ${last == null || QUIET_FIB_TFS.includes(f.tf)})
           ON CONFLICT (fib_id, ratio, level) DO NOTHING RETURNING id`;
         if (row) found++;
       }
@@ -136,7 +137,7 @@ export async function sendDigest(sql: postgres.Sql, settings: AlertSettings, err
     const shown = newHits.filter((h) => h.symbol === symbol);
     const earlier = (await sql`
       SELECT DISTINCT ON (h.tf) h.* FROM level_hits h JOIN fibs f ON f.id = h.fib_id AND f.active
-      WHERE h.symbol = ${symbol} AND h.sent ORDER BY h.tf, h.hit_at DESC`) as unknown as Hit[];
+      WHERE h.symbol = ${symbol} AND h.sent AND h.tf NOT IN ${sql(QUIET_FIB_TFS)} ORDER BY h.tf, h.hit_at DESC`) as unknown as Hit[];
     for (const h of earlier) if (!shown.some((s) => s.tf === h.tf)) shown.push(h);
     shown.sort((a, b) => tfSort(a.tf, b.tf) || a.ratio - b.ratio);
     for (const h of shown) {

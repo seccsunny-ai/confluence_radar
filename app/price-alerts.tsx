@@ -16,7 +16,7 @@ interface FibRow {
 }
 
 const tfLabel = (tf: string) => tf.replace(/h$/, "H");
-const TF_ORDER = ["15m", "1h", "2h", "4h", "1D", "1W"];
+const TF_ORDER = ["5m", "15m", "1h", "2h", "4h", "8h", "1D", "1W"];
 
 async function send(url: string, method: string, body?: unknown) {
   const r = await fetch(url, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });

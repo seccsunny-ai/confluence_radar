@@ -17,7 +17,11 @@ const GRANULARITY: Record<string, { g: string; ms: number }> = {
   "1W": { g: "1Wutc", ms: 7 * 86400_000 },
 };
 
-export const TF_MS: Record<string, number> = Object.fromEntries(Object.entries(GRANULARITY).map(([k, v]) => [k, v.ms]));
+// 8H isn't served by Bitget; it's built from 4H candles (candle-store.ts), so it only has a length here.
+export const TF_MS: Record<string, number> = {
+  ...Object.fromEntries(Object.entries(GRANULARITY).map(([k, v]) => [k, v.ms])),
+  "8h": 8 * 3600_000,
+};
 
 export function bitgetSymbol(symbol: string): string {
   return symbol.toUpperCase().replace(/\.P$/, "").replace(/[^A-Z0-9]/g, "");

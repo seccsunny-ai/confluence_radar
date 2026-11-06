@@ -2,7 +2,7 @@
 // looks for Gold signals reaching a matching fib (and a BOS/CHoCH after that), and sends the Telegram digest.
 import type postgres from "postgres";
 import { AUTO_FIB_TFS, legFibs } from "./autofib";
-import { storedCandles, weeklyFromDaily } from "./candle-store";
+import { eightHourFrom4h, storedCandles, weeklyFromDaily } from "./candle-store";
 import { fibLevels, firstTouch, type Fib } from "./fibs";
 import { candlesSince, recentCandles, TF_MS } from "./market";
 import { GOLD_WINDOW_DAYS, SIGNAL_BY_CODE } from "./signals";
@@ -137,12 +137,15 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   const drawFibs = async ([symbol, tf]: readonly [string, string]) => {
     let candles: Candle[];
     try {
-      if (tf === "1h" || tf === "2h") candles = (await recentCandles(symbol, tf, 1000)).slice(0, -1); // the last one is still forming
+      if (["5m", "15m", "1h", "2h"].includes(tf)) candles = (await recentCandles(symbol, tf, 1000)).slice(0, -1); // the last one is still forming
       else {
-        // Bitget serves about 90 days per call, so these are built up over a few runs; 1W comes from the daily candles.
-        const got = await storedCandles(sql, symbol, tf === "4h" ? "4h" : "1D", tf === "4h" ? 1000 : WEEKLY_DAYS, tf === "1W" ? 0 : 8);
+        // Bitget serves about 90 days per call, so these are built up over a few runs; 1W comes from the daily
+        // candles and 8H from the 4H ones.
+        const base = tf === "4h" || tf === "8h" ? "4h" : "1D";
+        const got = await storedCandles(sql, symbol, base, base === "4h" ? 1000 : WEEKLY_DAYS, tf === "1W" || tf === "8h" ? 0 : 8);
         if (!got.complete) return; // older history still coming: draw once it's all there
-        candles = tf === "1W" ? weeklyFromDaily(got.candles) : tf === "1D" ? got.candles.slice(-1000) : got.candles;
+        candles = tf === "1W" ? weeklyFromDaily(got.candles) : tf === "8h" ? eightHourFrom4h(got.candles)
+          : tf === "1D" ? got.candles.slice(-1000) : got.candles;
       }
     } catch (e) {
       errors.push(e instanceof Error ? e.message : String(e));
@@ -172,9 +175,12 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
       ON CONFLICT (symbol, tf) DO UPDATE SET last_closed = EXCLUDED.last_closed`;
     fibsRedrawn++;
   };
-  // 1W is built from the daily candles, so it goes after 1D has fetched them
-  await pool(due.filter(([, tf]) => tf !== "1W"), 4, drawFibs);
-  await pool(due.filter(([, tf]) => tf === "1W"), 4, drawFibs);
+  // 1W and 8H are built from the daily and 4H candles, so they go after 1D and 4H have fetched them
+  const derived = (tf: string) => tf === "1W" || tf === "8h";
+  await pool(due.filter(([, tf]) => !derived(tf)), 4, drawFibs);
+  await pool(due.filter(([, tf]) => derived(tf)), 4, drawFibs);
+  // 5m and 15m fibs come and go every few runs: drop the broken ones after 3 days so they don't pile up
+  await sql`DELETE FROM fibs WHERE source = 'auto' AND tf IN ('5m', '15m') AND NOT active AND ended_at < now() - interval '3 days'`;
 
   // ── Fibs entered by hand go once a candle on their timeframe closes beyond the swing they start from (below a
   // green fib's low, above a red fib's high), counting candles that closed after the fib was added ──

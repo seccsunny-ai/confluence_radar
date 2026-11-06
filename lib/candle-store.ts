@@ -68,6 +68,24 @@ export async function storedCandles(sql: postgres.Sql, symbol: string, tf: strin
 }
 
 const DAY = 86400_000;
+const H8 = 8 * 3600_000;
+
+/** 8H candles (00:00, 08:00 and 16:00 UTC, as TradingView draws them) from closed 4H ones. The one not yet over is left out. */
+export function eightHourFrom4h(candles: Candle[], now = Date.now()): Candle[] {
+  const current = now - (now % H8);
+  const out: Candle[] = [];
+  for (const c of candles) {
+    const t = c.t - (c.t % H8);
+    if (t >= current) break;
+    const last = out[out.length - 1];
+    if (last && last.t === t) {
+      last.h = Math.max(last.h, c.h);
+      last.l = Math.min(last.l, c.l);
+      last.c = c.c;
+    } else out.push({ t, o: c.o, h: c.h, l: c.l, c: c.c });
+  }
+  return out;
+}
 
 /** Weekly candles (weeks from Monday 00:00 UTC, as TradingView and Bitget draw them) from closed daily ones. Weeks not yet over are left out. */
 export function weeklyFromDaily(days: Candle[], now = Date.now()): Candle[] {

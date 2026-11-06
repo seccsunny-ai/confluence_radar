@@ -285,7 +285,7 @@ export function Fibs({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
     <>
       <form className="panel" onSubmit={submit}>
         <div className="muted small" style={{ marginBottom: 8 }}>
-          Fibs are drawn automatically on 1H, 2H, 4H, 1D and 1W from the swing structure (LuxAlgo SMC, swing length 50) of every symbol with a signal
+          Fibs are drawn automatically on 5m, 15m, 1H, 2H, 4H, 8H (from 4H candles), 1D and 1W from the swing structure (LuxAlgo SMC, swing length 50) of every symbol with a signal
           in the last 7 days. Every swing BOS or CHoCH starts a new leg. After a bullish break, a green fib runs from the lowest low between the broken
           swing high and the break up to the highest high since (bullish retest after a Gold Buy). After a bearish break, a red fib runs from the
           highest high between the broken swing low and the break down to the lowest low since (bearish retest after a Gold Sell). A fib goes once a
@@ -317,7 +317,7 @@ export function Fibs({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
           <input type="text" placeholder="Symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)} />
           <select value={tf} onChange={(e) => setTf(e.target.value)}>
             <option value="">All timeframes</option>
-            {["15m", "1h", "2h", "4h", "1D", "1W"].map((t) => <option key={t} value={t}>{tfLabel(t)}</option>)}
+            {["5m", "15m", "1h", "2h", "4h", "8h", "1D", "1W"].map((t) => <option key={t} value={t}>{tfLabel(t)}</option>)}
           </select>
           <select value={kind} onChange={(e) => setKind(e.target.value)}>
             <option value="">Auto and mine</option>

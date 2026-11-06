@@ -487,28 +487,26 @@ function goldRank(info?: SymbolFibs): { tier: number; t: number } {
   return { tier: 2, t: 0 };
 }
 
-/** A symbol's active fibs, each level marked hit (✅) or waiting (⏳). Fibs in the newest live Gold's direction first. */
-function FibStatus({ info, fmt }: { info?: SymbolFibs; fmt: (s: string) => string }) {
-  const newestGold = (info?.gold ?? []).filter((g) => g.live).sort((a, b) => b.signal_time.localeCompare(a.signal_time))[0];
-  const fibs = [...(info?.fibs ?? [])].sort((a, b) =>
-    Number(b.direction === newestGold?.direction) - Number(a.direction === newestGold?.direction));
-  if (!fibs.length) return <div className="small muted">No active fibs.</div>;
-  const hit = fibs.reduce((n, f) => n + f.levels.filter((l) => l.hit_at).length, 0);
-  const waiting = fibs.reduce((n, f) => n + f.levels.filter((l) => !l.hit_at).length, 0);
+// Which Symbols-tab column each fib timeframe goes in.
+const FIB_COLUMN: Record<string, string> = { "5m": "15m", "15m": "15m", "1h": "1h", "2h": "1h", "4h": "4h", "8h": "4h", "1D": "1D", "1W": "1D" };
+const FIB_COLUMNS = ["15m", "1h", "4h", "1D"];
+
+/** Fibs for one column, each level marked hit (✅) or waiting (⏳). Fibs against the newest live Gold are dimmed. */
+function CellFibs({ fibs, goldDir, fmt }: { fibs: SymbolFibs["fibs"]; goldDir?: string; fmt: (s: string) => string }) {
+  if (!fibs.length) return null;
   return (
-    <div className="fiblist">
-      <div className="small muted">Fib levels: {hit} hit · {waiting} waiting</div>
+    <div className="cellfibs">
       {fibs.map((f) => (
-        <div key={f.id} className="small" style={{ opacity: newestGold && f.direction !== newestGold.direction ? 0.6 : 1 }}>
-          <span className={`sig ${f.direction}`}>{tfLabel(f.tf)} {f.direction === "bull" ? "green" : "red"}</span>
-          <span className="muted"> {f.source === "auto" ? (f.forming ? "auto, forming" : "auto") : "mine"}{f.note ? `, ${f.note}` : ""}: </span>
+        <div key={f.id} className="small" style={{ opacity: goldDir && f.direction !== goldDir ? 0.6 : 1 }}>
+          <span className={`sig ${f.direction}`}>{tfLabel(f.tf)} {f.direction === "bull" ? "🟢" : "🔴"}</span>
+          <span className="muted"> {f.source === "auto" ? (f.forming ? "forming" : "") : "mine"}{f.note ? ` ${f.note}` : ""}</span>
           {f.levels.map((l) => {
             const dist = f.price ? ((f.price - l.price) / l.price) * 100 : null;
             return (
-              <span key={l.ratio} className="nowrap" style={{ marginRight: 10 }} title={l.hit_at ? `Hit ${fmt(l.hit_at)}` : "Not hit yet"}>
+              <div key={l.ratio} className="nowrap" title={l.hit_at ? `Hit ${fmt(l.hit_at)}` : "Not hit yet"}>
                 {l.hit_at ? "✅" : "⏳"} {l.ratio} {fmtPrice(l.price)}
                 <span className="muted">{l.hit_at ? ` hit ${ago(l.hit_at)}` : dist != null ? ` (${dist > 0 ? "+" : ""}${dist.toFixed(2)}%)` : ""}</span>
-              </span>
+              </div>
             );
           })}
         </div>
@@ -551,10 +549,10 @@ function Symbols({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
     }
     return {
       symbols,
-      tfs: [...tfSet].sort(tfSort),
+      tfs: [...new Set([...tfSet, ...(showFibs ? FIB_COLUMNS : [])])].sort(tfSort),
       cell: (s: string, tf: string) => (map.get(`${s}|${tf}`) ?? []).sort((a, b) => famOrder.indexOf(a.family) - famOrder.indexOf(b.family)),
     };
-  }, [rows, q, order, boardBySymbol]);
+  }, [rows, q, order, boardBySymbol, showFibs]);
 
   return (
     <>
@@ -570,7 +568,7 @@ function Symbols({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
         <span className="small muted">
           {symbols.length} symbols. Latest signal of each kind per timeframe; ⚡ rows are under 24 hours old.
           {order === "gold" && " A Gold counts for the order while it's inside its window (15m 2 days, 1H 7, 4H 14, 1D 21)."}
-          {showFibs && " ✅ = fib level already hit, ⏳ = waiting, with the distance from the price now."}
+          {showFibs && " Fibs sit in their column: 5m/15m → 15m, 1H/2H → 1H, 4H/8H → 4H, 1D/1W → 1D. ✅ = level already hit, ⏳ = waiting, with the distance from the price now; fibs against the newest Gold are dimmed."}
         </span>
       </div>
       {err && <div className="panel status-err">{err}</div>}
@@ -579,8 +577,11 @@ function Symbols({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
           <table className="board">
             <thead><tr><th>Symbol</th>{tfs.map((t) => <th key={t}>{t}</th>)}</tr></thead>
             <tbody>
-              {symbols.flatMap((s) => [
-                <tr key={s} className={showFibs ? "symhead" : undefined}>
+              {symbols.map((s) => {
+                const info = boardBySymbol.get(s);
+                const goldDir = (info?.gold ?? []).filter((g) => g.live).sort((a, b) => b.signal_time.localeCompare(a.signal_time))[0]?.direction;
+                return (
+                <tr key={s}>
                   <td><strong>{s}</strong></td>
                   {tfs.map((t) => (
                     <td key={t}>
@@ -592,11 +593,12 @@ function Symbols({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
                           </span>
                         );
                       })}
+                      {showFibs && <CellFibs fibs={(info?.fibs ?? []).filter((f) => FIB_COLUMN[f.tf] === t)} goldDir={goldDir} fmt={fmt} />}
                     </td>
                   ))}
-                </tr>,
-                ...(showFibs ? [<tr key={`${s}-fibs`}><td colSpan={tfs.length + 1}><FibStatus info={boardBySymbol.get(s)} fmt={fmt} /></td></tr>] : []),
-              ])}
+                </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

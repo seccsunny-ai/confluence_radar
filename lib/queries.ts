@@ -122,7 +122,7 @@ export async function listFibs(sql: postgres.Sql) {
     SELECT f.*, t.price, t.updated_at AS price_at FROM fibs f
     LEFT JOIN trends t ON t.symbol = f.symbol AND t.tf = '15m'
     WHERE f.source = 'manual' OR f.active OR f.ended_at > now() - interval '3 days'
-    ORDER BY f.active DESC, f.symbol, array_position(ARRAY['1h','2h','4h','1D','1W'], f.tf), f.anchor_t DESC NULLS FIRST, f.created_at DESC`;
+    ORDER BY f.active DESC, f.symbol, array_position(ARRAY['5m','15m','1h','2h','4h','8h','1D','1W'], f.tf), f.anchor_t DESC NULLS FIRST, f.created_at DESC`;
 }
 
 /**
