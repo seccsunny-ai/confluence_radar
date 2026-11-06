@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { QUIET_FIB_TFS } from "@/lib/autofib";
 import { getJson } from "./ui";
 
 // The alarm: while the site is open it checks every minute for new fib hits and for the user's own price alerts that
@@ -237,7 +238,7 @@ export function FibAlarm({ alarm, setAlarm, onHits }: { alarm: AlarmSettings; se
     lastId.current = Math.max(lastId.current, ...rows.map((r) => r.id));
     saveSeen();
     onHits();
-    const hits = rows.filter((r) => r.active && (alarm.only === "all" || r.confluence));
+    const hits = rows.filter((r) => r.active && !QUIET_FIB_TFS.includes(r.tf) && (alarm.only === "all" || r.confluence));
     await ring(hits.map((h) => ({ key: `h${h.id}`, kind: hitKind(h), text: hitText(h) })), hits.length === 1 ? "Fib hit" : `${hits.length} fib hits`);
   }, [alarm.only, onHits, ring]);
 

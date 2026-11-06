@@ -1,4 +1,4 @@
-// Fibs drawn automatically from the swing structure (LuxAlgo SMC, swing length 50) on 1H, 2H, 4H, 1D and 1W.
+// Fibs drawn automatically from the swing structure (LuxAlgo SMC, swing length 50) on 5m, 15m, 1H, 2H, 4H, 8H, 1D and 1W.
 //
 // Every swing BOS or CHoCH starts a new leg. After a bullish break (a close above the swing high) the leg starts at
 // the lowest low between that swing high and the break, and runs to the highest high before the next break: a green
@@ -10,7 +10,9 @@
 import { swingStructure, SWING_LENGTH, type Structure } from "./structure";
 import type { Candle } from "./trend";
 
-export const AUTO_FIB_TFS = ["1h", "2h", "4h", "1D", "1W"];
+export const AUTO_FIB_TFS = ["5m", "15m", "1h", "2h", "4h", "8h", "1D", "1W"];
+// Short-timeframe fibs: shown on the site, but their hits don't go to Telegram or the alarm.
+export const QUIET_FIB_TFS = ["5m", "15m"];
 
 export interface LegFib {
   direction: "bull" | "bear"; // bull = green
