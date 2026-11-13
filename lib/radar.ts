@@ -8,6 +8,7 @@ import { candlesSince, recentCandles, TF_MS } from "./market";
 import { GOLD_WINDOW_DAYS, SIGNAL_BY_CODE } from "./signals";
 import { findLevelHits, sendDigest } from "./digest";
 import { checkStale } from "./health";
+import { checkOscillator } from "./osc-check";
 import { checkPriceAlerts, sendPriceAlerts } from "./price-alerts";
 import { alertSettings, esc, sendTelegram, telegramReady, type AlertSettings } from "./telegram";
 import { analyzeTrend, fmtPrice, type Candle } from "./trend";
@@ -24,6 +25,7 @@ export interface TickSummary {
   fibsRedrawn: number; // symbol and timeframe pairs whose auto fibs were worked out again
   levelHits: number; // fib levels price reached since the last run
   priceAlerts: number; // the user's own alerts that price reached
+  oscChecked: number; // symbol and timeframe pairs whose Prime Oscillator was worked out after a new close
   manualFibsRemoved: number; // fibs entered by hand that price closed beyond
   fibHits: number;
   structureAfterFib: number;
@@ -56,7 +58,7 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   const started = Date.now();
   const settings = await alertSettings(sql);
   const errors: string[] = [];
-  let alertsSent = 0, priceAlerts = 0, trendsUpdated = 0, fibsRedrawn = 0, levelHits = 0, manualFibsRemoved = 0, fibHits = 0, structureAfterFib = 0;
+  let alertsSent = 0, priceAlerts = 0, oscChecked = 0, trendsUpdated = 0, fibsRedrawn = 0, levelHits = 0, manualFibsRemoved = 0, fibHits = 0, structureAfterFib = 0;
 
   const alert = async (enabled: boolean, key: string, html: string, isRecent: boolean) => {
     if (!enabled || !isRecent || !telegramReady()) return;
@@ -212,6 +214,13 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
     }
   });
 
+  // ── Prime Oscillator above +level / below -level on 1H, 2H, 4H, 1D ──
+  try {
+    oscChecked = await checkOscillator(sql, symbols, settings.oscLevel, errors);
+  } catch (e) {
+    errors.push(e instanceof Error ? e.message : String(e));
+  }
+
   // ── Every fib level price reached ──
   try {
     levelHits = await findLevelHits(sql, settings.fibTolerancePct, errors);
@@ -330,7 +339,7 @@ export async function tick(sql: postgres.Sql): Promise<TickSummary> {
   }
 
   const summary: TickSummary = {
-    symbols: symbols.length, trendsUpdated, fibsRedrawn, levelHits, priceAlerts, manualFibsRemoved, fibHits, structureAfterFib, alertsSent,
+    symbols: symbols.length, trendsUpdated, fibsRedrawn, levelHits, priceAlerts, oscChecked, manualFibsRemoved, fibHits, structureAfterFib, alertsSent,
     errors: [...new Set(errors)].slice(0, 20), ms: Date.now() - started,
   };
   await sql`INSERT INTO ticks (summary) VALUES (${sql.json({ ...summary })})`;

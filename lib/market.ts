@@ -43,7 +43,7 @@ async function call(path: string, params: Record<string, string | number>): Prom
 }
 
 const toCandles = (rows: string[][]): Candle[] =>
-  rows.map((r) => ({ t: +r[0], o: +r[1], h: +r[2], l: +r[3], c: +r[4] })).filter((c) => Number.isFinite(c.c));
+  rows.map((r) => ({ t: +r[0], o: +r[1], h: +r[2], l: +r[3], c: +r[4], v: +r[5] || 0 })).filter((c) => Number.isFinite(c.c));
 
 /** The latest `limit` candles (max 1000), oldest first. The last one is still forming. */
 export async function recentCandles(symbol: string, tf: string, limit = 300): Promise<Candle[]> {

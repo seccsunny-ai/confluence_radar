@@ -17,6 +17,8 @@ export interface AlertSettings {
   captureHealth: boolean; // the hourly capture failed, came back short, or stopped uploading
   captureStaleMinutes: number;
   priceAlerts: boolean; // the user's own price alerts, one message each
+  oscExtreme: boolean; // digest: Prime Oscillator above +oscLevel or below -oscLevel on 1H/2H/4H/1D
+  oscLevel: number;
 }
 
 export const DEFAULT_SETTINGS: AlertSettings = {
@@ -34,6 +36,8 @@ export const DEFAULT_SETTINGS: AlertSettings = {
   captureHealth: true,
   captureStaleMinutes: 90,
   priceAlerts: true,
+  oscExtreme: true,
+  oscLevel: 80,
 };
 
 export async function getSetting<T>(sql: postgres.Sql, key: string): Promise<T | null> {

@@ -214,6 +214,33 @@ async function migrate(s: postgres.Sql) {
     -- A new leg at every BOS as well as every CHoCH, ended by a close beyond either end: redraw everything once.
     DELETE FROM fib_runs WHERE NOT EXISTS (SELECT 1 FROM settings WHERE key = 'fibs_bos_legs');
     INSERT INTO settings (key, value) VALUES ('fibs_bos_legs', 'true') ON CONFLICT DO NOTHING;
+    -- Prime Oscillator+ (prime-osc.ts): its value at each timeframe's last closed candle, and every run of candles
+    -- beyond the overbought/oversold level (ended_t set once a candle closes back inside).
+    CREATE TABLE IF NOT EXISTS osc_readings (
+      symbol      TEXT NOT NULL,
+      tf          TEXT NOT NULL,
+      candle_t    TIMESTAMPTZ NOT NULL,
+      value       DOUBLE PRECISION NOT NULL,
+      prev_value  DOUBLE PRECISION,
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (symbol, tf)
+    );
+    CREATE TABLE IF NOT EXISTS osc_signals (
+      id           SERIAL PRIMARY KEY,
+      symbol       TEXT NOT NULL,
+      tf           TEXT NOT NULL,
+      side         TEXT NOT NULL,
+      level        DOUBLE PRECISION NOT NULL,
+      started_t    TIMESTAMPTZ NOT NULL,
+      last_t       TIMESTAMPTZ NOT NULL,
+      last_value   DOUBLE PRECISION NOT NULL,
+      peak         DOUBLE PRECISION NOT NULL,
+      ended_t      TIMESTAMPTZ,
+      detected_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      sent         BOOLEAN NOT NULL DEFAULT false,
+      UNIQUE (symbol, tf, side, started_t)
+    );
+    CREATE INDEX IF NOT EXISTS osc_signals_open ON osc_signals (symbol, tf) WHERE ended_t IS NULL;
     -- An early screenshot upload misread ONDOUSDT.P as ONDUSDT.P, which Bitget doesn't list: fold it into ONDOUSDT.P.
     UPDATE signals s SET symbol = 'ONDOUSDT.P' WHERE s.symbol = 'ONDUSDT.P' AND NOT EXISTS (
       SELECT 1 FROM signals o WHERE o.symbol = 'ONDOUSDT.P' AND o.tf = s.tf AND o.code = s.code AND o.signal_time = s.signal_time);

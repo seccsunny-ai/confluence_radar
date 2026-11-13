@@ -5,7 +5,7 @@
 // high in a downtrend (or a lower low in an uptrend) marks a potential change; the trend flips when the matching
 // higher low (lower high) confirms it. Price breaking the last swing high/low before the pivot confirms counts too.
 
-export interface Candle { t: number; o: number; h: number; l: number; c: number }
+export interface Candle { t: number; o: number; h: number; l: number; c: number; v?: number }
 export type Trend = "up" | "down" | "range";
 
 export interface Swing { price: number; t: number; kind: "HH" | "LH" | "HL" | "LL" | "H" | "L" }

@@ -7,7 +7,7 @@ import { Alerts, Fibs, FibSignals, Trends } from "./confluence";
 import { FibAlarm, FibHits, useAlarm } from "./fib-alarm";
 import { PriceAlerts } from "./price-alerts";
 
-type Tab = "matches" | "fib" | "hits" | "myalerts" | "trends" | "fibs" | "signals" | "symbols" | "uploads" | "alerts";
+type Tab = "matches" | "fib" | "hits" | "myalerts" | "osc" | "trends" | "fibs" | "signals" | "symbols" | "uploads" | "alerts";
 
 interface Signal {
   id: number;
@@ -522,6 +522,7 @@ function Symbols({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
   const [order, setOrder] = useState<"gold" | "name">("gold");
   const [showFibs, setShowFibs] = useState(true);
   const [board, setBoard] = useState<SymbolFibs[]>([]);
+  const [osc, setOsc] = useState<OscData | null>(null);
   useEffect(() => {
     setOrder(load("symbols.order", "gold"));
     setShowFibs(load("symbols.showFibs", true));
@@ -529,7 +530,13 @@ function Symbols({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
   useEffect(() => {
     getJson<Signal[]>(`/api/symbols`).then(setRows).catch((e) => setErr(e.message));
     getJson<SymbolFibs[]>("/api/symbol-fibs").then(setBoard).catch(() => {});
+    getJson<OscData>("/api/osc?days=0").then(setOsc).catch(() => {});
   }, [refresh]);
+  const oscBySymbol = useMemo(() => {
+    const m = new Map<string, OscSignal[]>();
+    for (const o of osc?.signals ?? []) if (!o.ended_t) m.set(o.symbol, [...(m.get(o.symbol) ?? []), o]);
+    return m;
+  }, [osc]);
   const boardBySymbol = useMemo(() => new Map(board.map((b) => [b.symbol, b])), [board]);
 
   const { symbols, tfs, cell } = useMemo(() => {
@@ -549,10 +556,10 @@ function Symbols({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
     }
     return {
       symbols,
-      tfs: [...new Set([...tfSet, ...(showFibs ? FIB_COLUMNS : [])])].sort(tfSort),
+      tfs: [...new Set([...tfSet, ...(showFibs ? FIB_COLUMNS : []), ...[...oscBySymbol.values()].flat().map((o) => OSC_COLUMN[o.tf])])].sort(tfSort),
       cell: (s: string, tf: string) => (map.get(`${s}|${tf}`) ?? []).sort((a, b) => famOrder.indexOf(a.family) - famOrder.indexOf(b.family)),
     };
-  }, [rows, q, order, boardBySymbol, showFibs]);
+  }, [rows, q, order, boardBySymbol, showFibs, oscBySymbol]);
 
   return (
     <>
@@ -569,6 +576,7 @@ function Symbols({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
           {symbols.length} symbols. Latest signal of each kind per timeframe; ⚡ rows are under 24 hours old.
           {order === "gold" && " A Gold counts for the order while it's inside its window (15m 2 days, 1H 7, 4H 14, 1D 21)."}
           {showFibs && " Fibs sit in their column: 5m/15m → 15m, 1H/2H → 1H, 4H/8H → 4H, 1D/1W → 1D. ✅ = level already hit, ⏳ = waiting, with the distance from the price now; fibs against the newest Gold are dimmed."}
+          {" 🌡️/🧊 = Prime Oscillator above +" + (osc?.level ?? 80) + " / below -" + (osc?.level ?? 80) + " right now (2H shows in the 1H column)."}
         </span>
       </div>
       {err && <div className="panel status-err">{err}</div>}
@@ -593,10 +601,165 @@ function Symbols({ fmt, refresh }: { fmt: (s: string) => string; refresh: number
                           </span>
                         );
                       })}
+                      {(oscBySymbol.get(s) ?? []).filter((o) => OSC_COLUMN[o.tf] === t).sort((a, b) => tfSort(a.tf, b.tf)).map((o) => (
+                        <OscLine key={o.id} o={o} fmt={fmt} withTf />
+                      ))}
                       {showFibs && <CellFibs fibs={(info?.fibs ?? []).filter((f) => FIB_COLUMN[f.tf] === t)} goldDir={goldDir} fmt={fmt} />}
                     </td>
                   ))}
                 </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ─────────────────────────────── Prime Oscillator ───────────────────────────────
+
+interface OscSignal {
+  id: number; symbol: string; tf: string; side: "ob" | "os"; level: number; started_t: string; last_t: string;
+  last_value: number; peak: number; ended_t: string | null; detected_at: string;
+}
+interface OscData {
+  level: number;
+  readings: Array<{ symbol: string; tf: string; candle_t: string; value: number; prev_value: number | null }>;
+  signals: OscSignal[];
+}
+const OSC_TFS = ["1h", "2h", "4h", "1D"];
+// Which Symbols-tab column each oscillator timeframe goes in (2H sits with 1H, like its fibs).
+const OSC_COLUMN: Record<string, string> = { "1h": "1h", "2h": "1h", "4h": "4h", "1D": "1D" };
+const OSC_FIB_TFS = ["1h", "2h", "4h", "8h", "1D", "1W"];
+const signed = (v: number) => `${v > 0 ? "+" : ""}${Math.round(v)}`;
+
+function OscLine({ o, fmt, withTf }: { o: OscSignal; fmt: (s: string) => string; withTf?: boolean }) {
+  return (
+    <span className={`line ${o.ended_t ? "old" : ""}`} title={`Peak ${signed(o.peak)}. Value at the last closed candle (${fmt(o.last_t)}).`}>
+      <span className={`sig ${o.side === "ob" ? "bear" : "bull"}`}>
+        {o.side === "ob" ? "🌡️" : "🧊"} {withTf ? `${tfLabel(o.tf)} ` : ""}Osc {signed(o.last_value)}
+      </span>
+      <span className="muted small"> {o.ended_t ? `${fmt(o.started_t)} → back inside ${fmt(o.ended_t)}` : `since ${fmt(o.started_t)}`}</span>
+    </span>
+  );
+}
+
+/** Every fib level on 1H–1W, split into already hit and still waiting. */
+function fibStatus(info: SymbolFibs | undefined) {
+  const fibs = (info?.fibs ?? []).filter((f) => OSC_FIB_TFS.includes(f.tf));
+  const levels = fibs.flatMap((f) => f.levels.map((l) => ({
+    f, l, dist: f.price ? ((f.price - l.price) / l.price) * 100 : null,
+  })));
+  const hit = levels.filter((x) => x.l.hit_at).sort((a, b) => b.l.hit_at!.localeCompare(a.l.hit_at!));
+  const waiting = levels.filter((x) => !x.l.hit_at).sort((a, b) => Math.abs(a.dist ?? 1e9) - Math.abs(b.dist ?? 1e9));
+  return { fibs, hit, waiting };
+}
+
+function PrimeOsc({ fmt, refresh }: { fmt: (s: string) => string; refresh: number }) {
+  const [data, setData] = useState<OscData | null>(null);
+  const [board, setBoard] = useState<SymbolFibs[]>([]);
+  const [err, setErr] = useState("");
+  const [q, setQ] = useState("");
+  const [tfs, setTfs] = useState<string[]>(OSC_TFS);
+  const [side, setSide] = useState<"all" | "ob" | "os">("all");
+  const [days, setDays] = useState(0);
+  useEffect(() => {
+    setTfs(load("osc.tfs", OSC_TFS));
+    setSide(load("osc.side", "all"));
+    setDays(load("osc.days", 0));
+  }, []);
+  useEffect(() => {
+    getJson<OscData>(`/api/osc?days=${Math.max(days, 0)}`).then(setData).catch((e) => setErr(e.message));
+    getJson<SymbolFibs[]>("/api/symbol-fibs").then(setBoard).catch(() => {});
+  }, [refresh, days]);
+  const boardBySymbol = useMemo(() => new Map(board.map((b) => [b.symbol, b])), [board]);
+
+  const rows = useMemo(() => {
+    const by = new Map<string, OscSignal[]>();
+    for (const o of data?.signals ?? []) {
+      if (!tfs.includes(o.tf) || (side !== "all" && o.side !== side) || !o.symbol.includes(q.toUpperCase())) continue;
+      if (o.ended_t && days === 0) continue;
+      by.set(o.symbol, [...(by.get(o.symbol) ?? []), o]);
+    }
+    const reading = new Map((data?.readings ?? []).map((r) => [`${r.symbol}|${r.tf}`, r]));
+    const newest = (list: OscSignal[]) => Math.max(...list.filter((o) => !o.ended_t).map((o) => new Date(o.started_t).getTime()), 0);
+    return [...by.entries()]
+      .map(([symbol, list]) => ({ symbol, list, reading: (tf: string) => reading.get(`${symbol}|${tf}`) }))
+      .sort((a, b) => newest(b.list) - newest(a.list) || a.symbol.localeCompare(b.symbol));
+  }, [data, tfs, side, q, days]);
+
+  const level = data?.level ?? 80;
+  return (
+    <>
+      <div className="panel row">
+        <input type="text" placeholder="Filter symbols" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Chips options={OSC_TFS} value={tfs} onChange={(v) => { setTfs(v); save("osc.tfs", v); }} render={tfLabel} />
+        <select value={side} onChange={(e) => { const v = e.target.value as "all" | "ob" | "os"; setSide(v); save("osc.side", v); }}>
+          <option value="all">Above +{level} and below -{level}</option>
+          <option value="ob">🌡️ Above +{level} only</option>
+          <option value="os">🧊 Below -{level} only</option>
+        </select>
+        <select value={days} onChange={(e) => { const v = Number(e.target.value); setDays(v); save("osc.days", v); }}>
+          <option value={0}>Only what&apos;s beyond the level now</option>
+          <option value={1}>Also ones that ended in the last day</option>
+          <option value={3}>… last 3 days</option>
+          <option value={7}>… last 7 days</option>
+        </select>
+        <span className="small muted">
+          {rows.length} symbols. The Prime Oscillator+ main line, worked out from Bitget candles at each candle close (same formula and default
+          settings as your TradingView script: length 14, smoothing 3, sensitivity 1.1). The level is set on the Telegram tab.
+          Fibs: every fib on 1H, 2H, 4H, 8H, 1D and 1W; ✅ = level already hit, ⏳ = waiting, with the distance from the price now.
+        </span>
+      </div>
+      {err && <div className="panel status-err">{err}</div>}
+      <div className="panel tablewrap">
+        {data && rows.length === 0 ? (
+          <div className="empty">
+            {data.readings.length ? `No symbol has the oscillator beyond ±${level} on these timeframes right now.` : "No oscillator values yet. They appear after the next check (every 15 minutes)."}
+          </div>
+        ) : (
+          <table className="board">
+            <thead><tr><th>Symbol</th>{OSC_TFS.filter((t) => tfs.includes(t)).map((t) => <th key={t}>{tfLabel(t)}</th>)}<th>Fibs 1H–1W</th></tr></thead>
+            <tbody>
+              {rows.map(({ symbol, list, reading }) => {
+                const st = fibStatus(boardBySymbol.get(symbol));
+                const latestHit = st.hit[0];
+                const nearest = st.waiting[0];
+                return (
+                  <tr key={symbol}>
+                    <td><strong>{symbol}</strong></td>
+                    {OSC_TFS.filter((t) => tfs.includes(t)).map((t) => {
+                      const here = list.filter((o) => o.tf === t);
+                      const r = reading(t);
+                      return (
+                        <td key={t}>
+                          {here.map((o) => <OscLine key={o.id} o={o} fmt={fmt} />)}
+                          {!here.some((o) => !o.ended_t) && r && <span className="line old small">now {signed(r.value)}</span>}
+                        </td>
+                      );
+                    })}
+                    <td>
+                      {!st.fibs.length ? <span className="muted small">No fibs on 1H–1W</span> : (
+                        <>
+                          <div className="small">
+                            {latestHit ? (
+                              <div>✅ <b>Hit</b> {st.hit.length} level{st.hit.length === 1 ? "" : "s"} · latest {tfLabel(latestHit.f.tf)} {latestHit.f.direction === "bull" ? "🟢" : "🔴"} {latestHit.l.ratio} {fmtPrice(latestHit.l.price)} <span className="muted">{ago(latestHit.l.hit_at!)}</span></div>
+                            ) : <div className="muted">✅ No level hit yet</div>}
+                            {nearest ? (
+                              <div>⏳ <b>Waiting</b> {st.waiting.length} level{st.waiting.length === 1 ? "" : "s"} · nearest {tfLabel(nearest.f.tf)} {nearest.f.direction === "bull" ? "🟢" : "🔴"} {nearest.l.ratio} {fmtPrice(nearest.l.price)}
+                                {nearest.dist != null && <span className="muted"> ({nearest.dist > 0 ? "+" : ""}{nearest.dist.toFixed(2)}%)</span>}</div>
+                            ) : <div className="muted">⏳ Nothing left waiting</div>}
+                          </div>
+                          <details>
+                            <summary className="small muted">All {st.fibs.length} fibs</summary>
+                            <CellFibs fibs={st.fibs} fmt={fmt} />
+                          </details>
+                        </>
+                      )}
+                    </td>
+                  </tr>
                 );
               })}
             </tbody>
@@ -674,6 +837,7 @@ export default function Page() {
     ["hits", "Fib hits 🔔"],
     ["myalerts", "My alerts ⏰"],
     ["fib", "Gold → Fib"],
+    ["osc", "Prime Osc 🌡️"],
     ["trends", "Trends"],
     ["fibs", "Fibs"],
     ["signals", "Signals"],
@@ -704,6 +868,7 @@ export default function Page() {
       {tab === "hits" && <FibHits fmt={fmt} refresh={refresh} alarm={alarm} setAlarm={setAlarm} />}
       {tab === "myalerts" && <PriceAlerts fmt={fmt} refresh={refresh} alarm={alarm} setAlarm={setAlarm} />}
       {tab === "fib" && <FibSignals fmt={fmt} refresh={refresh} />}
+      {tab === "osc" && <PrimeOsc fmt={fmt} refresh={refresh} />}
       {tab === "trends" && <Trends fmt={fmt} refresh={refresh} />}
       {tab === "fibs" && <Fibs fmt={fmt} refresh={refresh} />}
       {tab === "alerts" && <Alerts fmt={fmt} />}
