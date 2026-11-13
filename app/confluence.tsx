@@ -370,6 +370,7 @@ export function Fibs({ fmt, refresh }: { fmt: Fmt; refresh: number }) {
 interface AlertSettings {
   goldNew: boolean; fibHit: boolean; structureNew: boolean; gold: boolean; goldStructure: boolean; fibTouch: boolean; fibStructure: boolean; trendChange: boolean; trendPotential: boolean;
   trendTfs: string[]; fibTolerancePct: number; captureHealth: boolean; captureStaleMinutes: number; priceAlerts: boolean;
+  oscExtreme: boolean; oscLevel: number;
 }
 interface TelegramInfo {
   status: { configured: boolean; bot: string | null; chatId: string | null; chatFromEnv: boolean; error: string | null };
@@ -381,6 +382,7 @@ const TOGGLES: Array<[keyof AlertSettings, string]> = [
   ["goldNew", "🔥❄️ New Gold Buy / Gold Sell on any timeframe (once each, only signals new in the latest upload)"],
   ["structureNew", "📈📉 New BOS / CHoCH on any timeframe (once each, only signals new in the latest upload)"],
   ["fibHit", "🟢🔴🟡 Price hits a fib level (any fib, any timeframe; checked every 15 minutes)"],
+  ["oscExtreme", "🌡️🧊 Prime Oscillator above +level or below -level on 1H, 2H, 4H or 1D (checked after each candle close)"],
   ["priceAlerts", "⏰ My alerts (set on the My alerts tab): one message each when price reaches the level"],
   ["captureHealth", "🩺 Capture problems: a chart failed or read far fewer signals than usual, or no upload for a while"],
 ];
@@ -441,9 +443,9 @@ export function Alerts({ fmt }: { fmt: Fmt }) {
           <div key={k}><label><input type="checkbox" checked={info.settings[k] as boolean} onChange={(e) => save({ [k]: e.target.checked })} /> {label}</label></div>
         ))}
         <div className="small muted" style={{ marginTop: 6 }}>
-          Gold, BOS/CHoCH and fib hits come as one message per check, with a block for each symbol that has something new. The block also
+          Gold, BOS/CHoCH, Prime Oscillator and fib hits come as one message per check, with a block for each symbol that has something new. The block also
           repeats the symbol&apos;s latest Gold and BOS/CHoCH signal on each timeframe and its latest fib hit, so you keep the picture until something replaces it. 🆕 marks what&apos;s new.
-          🟢 bullish fib retest · 🔴 bearish fib retest · 🟡 the fib hit lines up with a Gold signal in the same direction that&apos;s still in its window.
+          🟢 bullish fib retest · 🔴 bearish fib retest · 🟡 the fib hit lines up with a Gold signal in the same direction that&apos;s still in its window. 🌡️ oscillator above +level (overbought) · 🧊 below -level (oversold), listed while it stays there.
         </div>
         <details style={{ marginTop: 8 }}>
           <summary className="small muted">Older alerts</summary>
@@ -458,6 +460,12 @@ export function Alerts({ fmt }: { fmt: Fmt }) {
             ))}
           </div>
         </details>
+        <div className="row small" style={{ marginTop: 8 }}>
+          <label>Prime Oscillator level&nbsp;±
+            <input type="number" step="1" min="1" max="104" style={{ width: 60 }} defaultValue={info.settings.oscLevel}
+              onBlur={(e) => save({ oscLevel: Number(e.target.value) })} /> (also used on the Prime Osc tab)
+          </label>
+        </div>
         <div className="row small" style={{ marginTop: 8 }}>
           <label>A fib counts as touched within&nbsp;
             <input type="number" step="0.05" min="0" max="5" style={{ width: 70 }} defaultValue={info.settings.fibTolerancePct}

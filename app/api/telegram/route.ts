@@ -41,6 +41,7 @@ export async function POST(req: Request) {
         }
       }
       s.fibTolerancePct = Math.min(Math.max(s.fibTolerancePct, 0), 5);
+      s.oscLevel = Math.min(Math.max(s.oscLevel, 1), 104);
       await setSetting(sql, "alerts", s);
       return NextResponse.json(s);
     }

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { legFibs } from "../lib/autofib";
 import { weeklyFromDaily } from "../lib/candle-store";
 import { FibInput, fibLevels, firstTouch } from "../lib/fibs";
+import { extremeRun, primeOscillator } from "../lib/prime-osc";
 import { swingStructure } from "../lib/structure";
 import { analyzeTrend, type Candle } from "../lib/trend";
 
@@ -127,6 +128,39 @@ assert.equal(fibLevels({ tf: "1D", direction: "bull", high: 124.95, low: 60.03 }
 for (const tf of ["15m", "60", "4h", "1D"]) assert.ok(FibInput.safeParse({ symbol: "X", tf, direction: "bull", high: 2, low: 1 }).success, tf);
 assert.equal(FibInput.safeParse({ symbol: "X", tf: "2h", direction: "bull", high: 2, low: 1 }).success, false);
 
+// ── Prime Oscillator ──
+/** `n` hourly candles: a random walk (fixed seed, oscillator stays inside ±80), then `rally` candles up 1.5% each (negative = down). */
+function oscSeries(n: number, rally: number, end = Date.now()): Candle[] {
+  const last = Math.floor(end / H) * H;
+  let p = 100;
+  let seed = 320;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  return Array.from({ length: n }, (_, i) => {
+    const o = p;
+    p = i >= n - Math.abs(rally) ? p * (rally > 0 ? 1.015 : 0.985) : p * (1 + (rnd() - 0.5) * 0.01);
+    return { t: last - (n - 1 - i) * H, o, c: p, h: Math.max(o, p) * 1.002, l: Math.min(o, p) * 0.998, v: 1000 + (i % 7) * 50 };
+  });
+}
+{
+  const up = oscSeries(400, 12);
+  const osc = primeOscillator(up);
+  assert.ok(osc.every((v) => Number.isNaN(v) || Math.abs(v) <= 105));
+  assert.ok(Number.isFinite(osc[200]), "has a value once warmed up");
+  assert.ok(osc.slice(160, 388).every((v) => Math.abs(v) < 80), "inside ±80 before the rally");
+  assert.ok(osc[399] > 80, `overbought after the rally: ${osc[399]}`);
+  const run = extremeRun(up, osc, 80)!;
+  assert.equal(run.side, "ob");
+  assert.ok(run.startT > up[388].t && run.startT <= up[399].t);
+  assert.ok(run.peak >= osc[399]);
+  assert.equal(extremeRun(up, osc, 80, 380), null);
+  const dn = oscSeries(400, -12);
+  const od = primeOscillator(dn);
+  assert.ok(od[399] < -80, `oversold after the drop: ${od[399]}`);
+  assert.equal(extremeRun(dn, od, 80)!.side, "os");
+  // No volume at all: MFI is replaced by RSI, as in the script
+  assert.ok(Number.isFinite(primeOscillator(up.map((c) => ({ ...c, v: 0 })))[399]));
+}
+
 console.log("confluence unit checks passed");
 
 // ── full check against Postgres ──
@@ -159,7 +193,7 @@ async function e2e() {
     if (url.hostname === "api.bitget.com") {
       assert.equal(url.searchParams.get("symbol"), "TESTUSDT");
       const g = url.searchParams.get("granularity")!;
-      const step = { "15m": M15, "1H": H, "2H": 2 * H, "4H": 4 * H, "1Dutc": 24 * H, "1Wutc": 168 * H }[g]!;
+      const step = { "5m": 5 * 60_000, "15m": M15, "1H": H, "2H": 2 * H, "4H": 4 * H, "1Dutc": 24 * H, "1Wutc": 168 * H }[g]!;
       const candles = g === "15m" && url.searchParams.has("startTime") ? priceDrop
         : recent15 && g === "15m" && url.searchParams.get("limit") === "12" ? recent15
         : legPoints && url.searchParams.get("limit") === "1000" ? path(legPoints, 60, step, now - legsEarly * 60 * step) : path(trendPoints, 8, step, now);
@@ -168,7 +202,7 @@ async function e2e() {
     return realFetch(input, init);
   }) as typeof fetch;
 
-  await sql().unsafe("DROP TABLE IF EXISTS price_alerts, level_hits, candles, candle_sets, fib_runs, fib_hits, fibs, trends, settings, alerts, ticks, sightings, signals, uploads, corrections");
+  await sql().unsafe("DROP TABLE IF EXISTS osc_signals, osc_readings, price_alerts, level_hits, candles, candle_sets, fib_runs, fib_hits, fibs, trends, settings, alerts, ticks, sightings, signals, uploads, corrections");
   const s = await db();
   // The older one-message alerts (now off by default) are checked first; the digest has its own section below.
   const { setSetting, DEFAULT_SETTINGS } = await import("../lib/telegram");
@@ -186,7 +220,7 @@ async function e2e() {
   let sum = await tick(s);
   assert.deepEqual(sum.errors, []);
   assert.equal(sum.trendsUpdated, 4);
-  assert.equal(sum.fibsRedrawn, 5); // too few candles for swing length 50, so no auto fibs, but each timeframe ran
+  assert.equal(sum.fibsRedrawn, 8); // too few candles for swing length 50, so no auto fibs, but each timeframe ran
   assert.equal(sum.fibHits, 1);
   assert.equal(sum.structureAfterFib, 0);
   let rows = await fibSignals(s, 14);
@@ -226,19 +260,20 @@ async function e2e() {
   legsEarly = 1;
   await s`DELETE FROM fib_runs`;
   sum = await tick(s);
-  assert.equal(sum.fibsRedrawn, 5);
-  let auto = await s`SELECT tf, direction, low, high, forming, active FROM fibs WHERE source = 'auto' ORDER BY tf, direction`;
-  assert.equal(auto.length, 4); // 1H, 2H, 4H, 1D (1W is built from these daily candles: too few weeks here)
+  assert.equal(sum.fibsRedrawn, 8);
+  // 8H is built from the 4H candles, so its legs are half as many bars: left out here
+  let auto = await s`SELECT tf, direction, low, high, forming, active FROM fibs WHERE source = 'auto' AND tf <> '8h' ORDER BY tf, direction`;
+  assert.equal(auto.length, 6); // 5m, 15m, 1H, 2H, 4H, 1D (1W is built from these daily candles: too few weeks here)
   assert.ok(auto.every((f) => f.active && f.direction === "bear" && f.forming && f.low < 95)); // only the latest leg is left
   // Redrawn after a close above the red fibs' high: they end, and the up move that broke them is the new leg
   legPoints = [...legPoints, 140];
   legsEarly = 0;
   await s`DELETE FROM fib_runs`;
   await tick(s);
-  auto = await s`SELECT direction, active, ended_at FROM fibs WHERE source = 'auto' AND tf <> '1W'`;
-  assert.equal(auto.filter((f) => f.direction === "bear").length, 4);
+  auto = await s`SELECT direction, active, ended_at FROM fibs WHERE source = 'auto' AND tf NOT IN ('1W', '8h')`;
+  assert.equal(auto.filter((f) => f.direction === "bear").length, 6);
   assert.ok(auto.every((f) => (f.direction === "bear") === !f.active && (f.direction === "bear") === !!f.ended_at));
-  assert.equal(auto.filter((f) => f.active).length, 4);
+  assert.equal(auto.filter((f) => f.active).length, 6);
 
   // ── The Telegram digest: new Gold signals and every fib level hit, one block per symbol ──
   const { setSetting: set2, DEFAULT_SETTINGS: defaults } = await import("../lib/telegram");
@@ -260,9 +295,9 @@ async function e2e() {
   assert.equal(sent.length, 1);
   assert.equal(sent[0], [
     "<b>TEST</b>",
-    "🔥 Gold Buy - 15m 🆕, 1H 🆕",
+    "<tg-spoiler>🔥 Gold Buy - 15m 🆕, 1H 🆕</tg-spoiler>",
     "❄️ Gold Sell - 4H",
-    "🟡 Fib - 4H 0.5 fib hit · 90 🆕 (Gold Buy confluence)",
+    "<tg-spoiler>🟡 Fib - 4H 0.5 fib hit · 90 🆕 (Gold Buy confluence)</tg-spoiler>",
   ].join("\n"));
   // Nothing new: nothing sent. The same level again doesn't count twice.
   sent.length = 0;
@@ -278,7 +313,7 @@ async function e2e() {
     "<b>TEST</b>",
     "🔥 Gold Buy - 15m, 1H",
     "❄️ Gold Sell - 4H",
-    "🔴 Fib - 1H 0.5 fib hit · 110 🆕",
+    "<tg-spoiler>🔴 Fib - 1H 0.5 fib hit · 110 🆕</tg-spoiler>",
     "🟡 Fib - 4H 0.5 fib hit · 90 (Gold Buy confluence)",
   ].join("\n"));
   recent15 = null;
@@ -291,6 +326,59 @@ async function e2e() {
   await s`INSERT INTO fibs (symbol, tf, direction, high, low) VALUES ('TESTUSDT.P', '15m', 'bull', 100, 80)`;
   sum = await tick(s);
   assert.equal(sum.manualFibsRemoved, 0);
+
+
+  // ── Prime Oscillator: above +80 after a rally, sent once in the digest, then back inside ──
+  {
+    let rally = 0;
+    const fakeFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      if (url.hostname === "api.telegram.org") {
+        sent.push(JSON.parse(String(init?.body)).text);
+        return Response.json({ ok: true, result: {} });
+      }
+      if (url.pathname.endsWith("history-candles")) return Response.json({ code: "00000", data: [] });
+      const g = url.searchParams.get("granularity")!;
+      const step = { "5m": 5 * 60_000, "15m": M15, "1H": H, "2H": 2 * H, "4H": 4 * H, "1Dutc": 24 * H, "1Wutc": 168 * H }[g]!;
+      const candles = oscSeries(401, rally).map((c, i, all) => ({ ...c, t: Math.floor(now / step) * step - (all.length - 1 - i) * step }));
+      return Response.json({ code: "00000", data: candles.map((c) => [String(c.t), String(c.o), String(c.h), String(c.l), String(c.c), String(c.v), "1"]) });
+    }) as typeof fetch;
+    await s`DELETE FROM fibs`;
+    await s`DELETE FROM level_hits`;
+    await s`DELETE FROM osc_readings`; // read earlier from the other test candles
+    await s`DELETE FROM osc_signals`;
+    await s`UPDATE signals SET first_seen_at = now() - interval '1 day'`; // no Gold news in the digest
+    await set2(s, "alerts", { ...defaults, captureHealth: false, goldNew: false, fibHit: false });
+    const nextClose = () => s`UPDATE osc_readings SET candle_t = candle_t - interval '1 day'`; // as if a day of candles has closed since
+    sent.length = 0;
+    sum = await tick(s);
+    assert.deepEqual(sum.errors, []);
+    assert.equal(sum.oscChecked, 4);
+    assert.equal((await s`SELECT count(*)::int AS n FROM osc_signals`)[0].n, 0);
+    // A rally: overbought on every timeframe. The runs that started after the last reading are new.
+    rally = 12;
+    await nextClose();
+    sum = await tick(s);
+    assert.equal(sum.oscChecked, 4);
+    const osc = await s`SELECT tf, side, ended_t, last_value FROM osc_signals ORDER BY tf`;
+    assert.deepEqual(osc.map((o) => `${o.tf} ${o.side}`), ["1D ob", "1h ob", "2h ob", "4h ob"]);
+    assert.ok(osc.every((o) => !o.ended_t && o.last_value > 80));
+    assert.equal(sent.length, 1);
+    assert.match(sent[0], /^<b>TEST<\/b>\n🔥 Gold Buy - 15m, 1H\n❄️ Gold Sell - 4H\n<tg-spoiler>🌡️ Prime Osc above \+80 - 1H \+\d+ 🆕, 2H \+\d+ 🆕, 4H \+\d+, 1D \+\d+<\/tg-spoiler>$/);
+    sent.length = 0;
+    sum = await tick(s);
+    assert.equal(sum.oscChecked, 0); // not redone before the next candle closes
+    assert.equal(sent.length, 0); // and not sent again
+    // Back inside: the runs end and nothing is sent
+    rally = 0;
+    await nextClose();
+    sum = await tick(s);
+    assert.equal(sum.oscChecked, 4);
+    assert.equal((await s`SELECT count(*)::int AS n FROM osc_signals WHERE ended_t IS NULL`)[0].n, 0);
+    assert.equal(sent.length, 0);
+    globalThis.fetch = fakeFetch;
+  }
 
   // Older daily candles are paged in a few at a time (Bitget serves 90 days per call) and kept
   const { storedCandles } = await import("../lib/candle-store");

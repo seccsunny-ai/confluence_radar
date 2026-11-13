@@ -1,4 +1,5 @@
-// What goes to Telegram: new Gold and BOS/CHoCH signals (once each) and every fib level price reaches, checked on each
+// What goes to Telegram: new Gold and BOS/CHoCH signals (once each), every fib level price reaches and the Prime
+// Oscillator going beyond ±80 on 1H/2H/4H/1D, checked on each
 // run, sent as one message with a block per symbol. Each block also repeats the symbol's latest Gold and BOS/CHoCH
 // signal on every timeframe and its latest fib hit, so the earlier picture stays visible until something replaces it.
 import type postgres from "postgres";
@@ -84,6 +85,7 @@ export async function findLevelHits(sql: postgres.Sql, tolerancePct: number, err
   return found;
 }
 
+interface Osc { id: number; symbol: string; tf: string; side: "ob" | "os"; last_value: number }
 interface Hit { id: number; symbol: string; tf: string; direction: string; ratio: number; level: number; hit_at: Date }
 
 /** The Telegram digest. Returns how many messages were sent. */
@@ -100,17 +102,22 @@ export async function sendDigest(sql: postgres.Sql, settings: AlertSettings, err
     SELECT h.* FROM level_hits h JOIN fibs f ON f.id = h.fib_id AND f.active
     WHERE NOT h.sent AND h.detected_at > now() - ${NEW_WINDOW}::interval
     ORDER BY h.hit_at`) as unknown as Hit[] : [];
+  const newOsc = settings.oscExtreme ? (await sql`
+    SELECT * FROM osc_signals WHERE NOT sent AND ended_t IS NULL AND detected_at > now() - ${NEW_WINDOW}::interval`) as unknown as Osc[] : [];
   // Anything older, or with its alert switched off, is never sent.
   await sql`UPDATE level_hits SET sent = true WHERE NOT sent AND (detected_at <= now() - ${NEW_WINDOW}::interval OR ${!settings.fibHit})`;
-  if (!newGold.length && !newStructure.length && !newHits.length) return 0;
+  await sql`UPDATE osc_signals SET sent = true WHERE NOT sent AND (detected_at <= now() - ${NEW_WINDOW}::interval OR ended_t IS NOT NULL OR ${!settings.oscExtreme})`;
+  if (!newGold.length && !newStructure.length && !newHits.length && !newOsc.length) return 0;
   if (!telegramReady()) return 0;
 
   const symbols = [...new Set([
     ...newGold.map((g) => g.symbol as string), ...newStructure.map((g) => g.symbol as string), ...newHits.map((h) => h.symbol),
+    ...newOsc.map((o) => o.symbol),
   ])].sort();
   const gold = await liveGold(sql);
   const newGoldIds = new Set([...newGold, ...newStructure].map((g) => g.id as number));
   const newHitIds = new Set(newHits.map((h) => h.id));
+  const newOscIds = new Set(newOsc.map((o) => o.id));
   const blocks: string[] = [];
 
   for (const symbol of symbols) {
@@ -131,6 +138,15 @@ export async function sendDigest(sql: postgres.Sql, settings: AlertSettings, err
         const tfs = structure.filter((g) => g.code === def.code).sort((a, b) => tfSort(a.tf, b.tf))
           .map((g) => `${tfLabel(g.tf)}${newGoldIds.has(g.id) ? " 🆕" : ""}`);
         if (tfs.length) lines.push(spoilerIfNew(`${def.direction === "bull" ? "📈" : "📉"} ${def.name} - ${tfs.join(", ")}`));
+      }
+    }
+    // Prime Oscillator: every timeframe that's beyond the level now (once its alert is on)
+    if (settings.oscExtreme) {
+      const osc = (await sql`SELECT * FROM osc_signals WHERE symbol = ${symbol} AND ended_t IS NULL`) as unknown as Osc[];
+      for (const side of ["ob", "os"]) {
+        const tfs = osc.filter((o) => o.side === side).sort((a, b) => tfSort(a.tf, b.tf))
+          .map((o) => `${tfLabel(o.tf)} ${o.last_value > 0 ? "+" : ""}${Math.round(o.last_value)}${newOscIds.has(o.id) ? " 🆕" : ""}`);
+        if (tfs.length) lines.push(spoilerIfNew(`${side === "ob" ? "🌡️" : "🧊"} Prime Osc ${side === "ob" ? `above +${settings.oscLevel}` : `below -${settings.oscLevel}`} - ${tfs.join(", ")}`));
       }
     }
     // The new fib hits, and the latest earlier hit on each other timeframe
@@ -169,5 +185,6 @@ export async function sendDigest(sql: postgres.Sql, settings: AlertSettings, err
   for (const g of newGold) await sql`INSERT INTO alerts (key, text) VALUES (${"g2:" + g.id}, '') ON CONFLICT DO NOTHING`;
   for (const g of newStructure) await sql`INSERT INTO alerts (key, text) VALUES (${"s2:" + g.id}, '') ON CONFLICT DO NOTHING`;
   if (newHits.length) await sql`UPDATE level_hits SET sent = true WHERE id IN ${sql(newHits.map((h) => h.id))}`;
+  if (newOsc.length) await sql`UPDATE osc_signals SET sent = true WHERE id IN ${sql(newOsc.map((o) => o.id))}`;
   return sent;
 }
