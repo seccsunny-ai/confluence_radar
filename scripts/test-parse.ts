@@ -127,5 +127,9 @@ assert.equal(flat[0].warnings.length, 0);
 // Symbols: exchange prefix dropped, and a misreading seen in uploads fixed
 assert.equal(normalizeSymbol(" bitget:ondousdt.p "), "ONDOUSDT.P");
 assert.equal(normalizeSymbol("ONDUSDT.P"), "ONDOUSDT.P");
+assert.equal(normalizeSymbol("jup"), "JUPUSDT.P");
+assert.equal(normalizeSymbol("JUPUSDT"), "JUPUSDT.P");
+assert.equal(normalizeSymbol("BITGET:JUPUSDT.P"), "JUPUSDT.P");
+assert.equal(normalizeSymbol("JUP.P"), "JUPUSDT.P");
 
 console.log("parse tests passed");

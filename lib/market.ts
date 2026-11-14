@@ -24,7 +24,8 @@ export const TF_MS: Record<string, number> = {
 };
 
 export function bitgetSymbol(symbol: string): string {
-  return symbol.toUpperCase().replace(/\.P$/, "").replace(/[^A-Z0-9]/g, "");
+  const s = symbol.toUpperCase().replace(/\.P$/, "").replace(/[^A-Z0-9]/g, "");
+  return /(USDT|USDC)$/.test(s) ? s : s + "USDT"; // a bare "JUP" is Bitget's "JUPUSDT"
 }
 
 async function call(path: string, params: Record<string, string | number>): Promise<string[][]> {
