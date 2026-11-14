@@ -61,6 +61,11 @@ const SYMBOL_FIXES: Record<string, string> = { "ONDUSDT.P": "ONDOUSDT.P" };
 export function normalizeSymbol(raw: string): string {
   let s = raw.trim().toUpperCase().replace(/\s+/g, "");
   if (s.includes(":")) s = s.split(":").pop()!;
+  // Everything here is a Bitget USDT perpetual, written like TradingView's "JUPUSDT.P". A bare coin typed in by hand
+  // ("JUP") or a spot-style ticker ("JUPUSDT") would otherwise be stored apart and sent to Bitget as "JUP", which it
+  // rejects ("Parameter JUP does not exist").
+  if (s && !/(USDT|USDC)(\.P)?$/.test(s)) s = s.replace(/\.P$/, "") + "USDT.P";
+  else if (/(USDT|USDC)$/.test(s)) s += ".P";
   return SYMBOL_FIXES[s] ?? s;
 }
 

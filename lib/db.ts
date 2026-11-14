@@ -248,5 +248,24 @@ async function migrate(s: postgres.Sql) {
     DELETE FROM trends WHERE symbol = 'ONDUSDT.P';
     DELETE FROM fibs WHERE symbol = 'ONDUSDT.P';
     DELETE FROM fib_runs WHERE symbol = 'ONDUSDT.P';
+    -- Symbols typed in by hand as a bare coin ("JUP") made every Bitget call fail with "Parameter JUP does not exist".
+    -- New ones are written as "JUPUSDT.P" (normalizeSymbol); fold the old ones into that name. Candles, trends and
+    -- oscillator readings for them never loaded, so those rows are just dropped.
+    UPDATE signals s SET symbol = s.symbol || 'USDT.P' WHERE s.symbol !~ '(USDT|USDC)(\\.P)?$' AND NOT EXISTS (
+      SELECT 1 FROM signals o WHERE o.symbol = s.symbol || 'USDT.P' AND o.tf = s.tf AND o.code = s.code AND o.signal_time = s.signal_time);
+    DELETE FROM signals WHERE symbol !~ '(USDT|USDC)(\\.P)?$';
+    UPDATE corrections c SET symbol = c.symbol || 'USDT.P' WHERE c.symbol !~ '(USDT|USDC)(\\.P)?$' AND NOT EXISTS (
+      SELECT 1 FROM corrections o WHERE o.symbol = c.symbol || 'USDT.P' AND o.tf = c.tf AND o.from_code = c.from_code AND o.signal_time = c.signal_time);
+    DELETE FROM corrections WHERE symbol !~ '(USDT|USDC)(\\.P)?$';
+    DELETE FROM fibs WHERE source = 'auto' AND symbol !~ '(USDT|USDC)(\\.P)?$';
+    UPDATE fibs SET symbol = symbol || 'USDT.P' WHERE symbol !~ '(USDT|USDC)(\\.P)?$';
+    UPDATE level_hits SET symbol = symbol || 'USDT.P' WHERE symbol !~ '(USDT|USDC)(\\.P)?$';
+    UPDATE price_alerts SET symbol = symbol || 'USDT.P' WHERE symbol !~ '(USDT|USDC)(\\.P)?$';
+    DELETE FROM trends WHERE symbol !~ '(USDT|USDC)(\\.P)?$';
+    DELETE FROM fib_runs WHERE symbol !~ '(USDT|USDC)(\\.P)?$';
+    DELETE FROM candles WHERE symbol !~ '(USDT|USDC)(\\.P)?$';
+    DELETE FROM candle_sets WHERE symbol !~ '(USDT|USDC)(\\.P)?$';
+    DELETE FROM osc_readings WHERE symbol !~ '(USDT|USDC)(\\.P)?$';
+    DELETE FROM osc_signals WHERE symbol !~ '(USDT|USDC)(\\.P)?$';
   `);
 }
